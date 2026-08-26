@@ -582,17 +582,14 @@ export function ProjectWorkspace({
           <div className="sheet-list">
             {sheets.map((sheet) => (
               <div key={sheet.id}>
-                <span>
-                  <Files size={15} />
-                  {toPersianDigits(sheet.name)}
-                </span>
+                <span>{toPersianDigits(sheet.name)}</span>
                 <div className="sheet-actions">
                   <button
                     className="icon-button"
                     onClick={() => setRenameSheet(sheet)}
                     aria-label="تغییر نام شیت"
                   >
-                    <Pencil size={15} />
+                    <Pencil size={13} />
                   </button>
                   <button
                     className="icon-button danger"
@@ -600,7 +597,7 @@ export function ProjectWorkspace({
                     disabled={sheets.length === 1}
                     aria-label="حذف شیت"
                   >
-                    <Trash2 size={15} />
+                    <Trash2 size={13} />
                   </button>
                 </div>
               </div>

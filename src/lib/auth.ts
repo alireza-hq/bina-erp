@@ -8,6 +8,7 @@ import type { DirectoryUser } from "./ldap";
 
 const COOKIE_NAME = "bina_session";
 const SESSION_DAYS = 7;
+const OWNER_ADMIN_USERNAME = "a.haghighi";
 function secret() {
   const value = process.env.JWT_SECRET;
   if (!value || value.length < 32)
@@ -118,6 +119,9 @@ export async function requireAdmin() {
 }
 export function isAdmin(user: AppUser) {
   return user.role === "admin";
+}
+export function canDeleteProjects(user: Pick<AppUser, "username" | "role">) {
+  return user.role === "admin" && user.username.toLowerCase() === OWNER_ADMIN_USERNAME;
 }
 export async function getProjectPermission(
   user: AppUser,

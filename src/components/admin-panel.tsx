@@ -170,6 +170,7 @@ export function AdminPanel({
   permissions: Permission[];
 }) {
   const router = useRouter();
+  const canDeleteProjects = actor.username.toLowerCase() === "a.haghighi";
   const [tab, setTab] = useState<"users" | "projects" | "access">("users");
   const [projectEditor, setProjectEditor] = useState<Project | "new" | null>(null);
   const [message, setMessage] = useState("");
@@ -307,13 +308,15 @@ export function AdminPanel({
                     >
                       <Pencil size={16} />
                     </button>
-                    <button
-                      className="icon-button danger"
-                      onClick={() => removeProject(project)}
-                      aria-label="حذف"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    {canDeleteProjects && (
+                      <button
+                        className="icon-button danger"
+                        onClick={() => removeProject(project)}
+                        aria-label="حذف"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

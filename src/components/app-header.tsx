@@ -21,8 +21,7 @@ export function AppHeader({ user }: { user: { displayName: string; role: "admin"
     <header className="topbar">
       <div className="topbar-inner">
         <Link href="/dashboard" className="wordmark">
-          <Image src="/logo.png" alt="بینا" width={32} height={36} priority />
-          <span>بینا</span>
+          <Image src="/logo.png" alt="بینا" width={44} height={50} priority />
         </Link>
         <nav className="main-nav" aria-label="ناوبری اصلی">
           <Link
@@ -42,15 +41,16 @@ export function AppHeader({ user }: { user: { displayName: string; role: "admin"
           )}
         </nav>
         <div className="account">
-          <span className="account-avatar">{toPersianDigits(user.displayName.slice(0, 1))}</span>
-          <span className="account-name">{toPersianDigits(user.displayName)}</span>
-          <button
-            className="icon-button signout-button"
-            onClick={logout}
-            disabled={busy}
-            aria-label="خروج"
-          >
-            <LogOut size={18} />
+          <div className="account-profile">
+            <span className="account-avatar">{toPersianDigits(user.displayName.slice(0, 1))}</span>
+            <span className="account-copy">
+              <strong>{toPersianDigits(user.displayName)}</strong>
+              <small>{admin ? "مدیر" : "کاربر"}</small>
+            </span>
+          </div>
+          <button className="signout-button" onClick={logout} disabled={busy} aria-label="خروج">
+            <LogOut size={16} />
+            <span>خروج</span>
           </button>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
-import { getCurrentUser, hasSameOrigin, isAdmin } from "@/lib/auth";
+import { canDeleteProjects, getCurrentUser, hasSameOrigin, isAdmin } from "@/lib/auth";
 import { jsonError, parseJson } from "@/lib/api";
 import { projectSchema } from "@/lib/validation";
 async function authorize(request: Request) {
@@ -26,7 +26,9 @@ export async function PATCH(request: Request, context: RouteContext<"/api/admin/
   }
 }
 export async function DELETE(request: Request, context: RouteContext<"/api/admin/projects/[id]">) {
-  if (!(await authorize(request))) return jsonError("دسترسی کافی ندارید", 403);
+  const actor = await authorize(request);
+  if (!actor || !canDeleteProjects(actor))
+    return jsonError("حذف پروژه فقط برای مدیر اصلی مجاز است", 403);
   const { id } = await context.params;
   await db.delete(projects).where(eq(projects.id, id));
   return Response.json({ ok: true });

@@ -22,7 +22,7 @@ body {
 body {
   background-color: var(--canvas);
   background-image: linear-gradient(#f6f7f9d9, #f6f7f9d9), url("/background.jpg");
-  background-position: center;
+  background-position: center center;
   background-size: cover;
   background-attachment: fixed;
   color: var(--ink);
@@ -268,7 +268,7 @@ textarea:focus {
   color: var(--navy);
 }
 .wordmark img {
-  width: 30px;
+  width: 42px;
   height: auto;
   object-fit: contain;
 }
@@ -297,8 +297,19 @@ textarea:focus {
   margin-right: auto;
   display: flex;
   align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid #e4e8ef;
+  border-radius: 12px;
+  background: #fff;
+  direction: rtl;
+  box-shadow: 0 3px 12px #1725540a;
+}
+.account-profile {
+  display: flex;
+  align-items: center;
   gap: 9px;
-  direction: ltr;
+  padding-inline: 2px 7px;
 }
 .account-avatar {
   display: grid;
@@ -311,12 +322,36 @@ textarea:focus {
   font-weight: 800;
   flex: none;
 }
-.account-name {
-  font-size: 12px;
-  font-weight: 700;
+.account-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.35;
+}
+.account-copy strong {
+  max-width: 160px;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-copy small {
+  color: var(--muted);
+  font-size: 9px;
 }
 .signout-button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #fff6f7;
   color: #b53a47;
+  font-size: 10px;
+  font-weight: 800;
 }
 .signout-button:hover {
   background: #fff0f2;
@@ -842,8 +877,8 @@ textarea:focus {
   gap: 2px;
 }
 .sheet-actions .icon-button {
-  width: 32px;
-  height: 32px;
+  width: 27px;
+  height: 27px;
 }
 .table-surface {
   margin-top: 20px;
@@ -919,9 +954,6 @@ textarea:focus {
   color: #5b667a;
   font-weight: 750;
   text-align: right;
-}
-.letters-table th:not(:first-child) {
-  border-inline-start: 1px solid #e0e5ec;
 }
 .letters-table tbody tr:hover td {
   background: #fafbfc;
@@ -1226,7 +1258,7 @@ textarea:focus {
   .admin-layout {
     grid-template-columns: 1fr;
   }
-  .account-name {
+  .account-copy {
     display: none;
   }
   .upload-grid {

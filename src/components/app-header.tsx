@@ -5,11 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function AppHeader({
-  user,
-}: {
-  user: { displayName: string; role: "super_admin" | "admin" | "user" };
-}) {
+export function AppHeader({ user }: { user: { displayName: string; role: "admin" | "user" } }) {
   const pathname = usePathname();
   const router = useRouter();
   const [busy, setBusy] = useState(false);

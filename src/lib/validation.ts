@@ -23,7 +23,7 @@ export const permissionSchema = z.object({
 });
 export const userAdminSchema = z
   .object({
-    role: z.enum(["super_admin", "admin", "user"]).optional(),
+    role: z.enum(["admin", "user"]).optional(),
     active: z.boolean().optional(),
   })
   .refine((value) => value.role !== undefined || value.active !== undefined);

@@ -2,10 +2,6 @@ import { authenticateDirectoryUser } from "@/lib/ldap";
 import { createSession, hasSameOrigin, syncDirectoryUser } from "@/lib/auth";
 import { jsonError, parseJson } from "@/lib/api";
 import { loginSchema } from "@/lib/validation";
-import { verifyPassword } from "@/lib/password";
-import { db } from "@/db";
-import { users } from "@/db/schema";
-import { eq } from "drizzle-orm";
 
 const attempts = new Map<string, { count: number; resetAt: number }>();
 function attemptKey(request: Request, username: string) {
@@ -21,17 +17,9 @@ export async function POST(request: Request) {
   if (record && record.resetAt > now && record.count >= 5)
     return jsonError("تلاش‌های ورود بیش از حد است. ۱۵ دقیقه دیگر دوباره تلاش کنید.", 429);
   try {
-    const localUser = await db.query.users.findFirst({
-      where: eq(users.username, parsed.data.username.toLowerCase()),
-    });
-    const user = localUser?.passwordHash
-      ? verifyPassword(parsed.data.password, localUser.passwordHash)
-        ? localUser
-        : null
-      : await authenticateDirectoryUser(parsed.data.username, parsed.data.password).then(
-          syncDirectoryUser,
-        );
-    if (!user) throw new Error("Invalid credentials");
+    const user = await authenticateDirectoryUser(parsed.data.username, parsed.data.password).then(
+      syncDirectoryUser,
+    );
     if (!user.active) return jsonError("این حساب غیرفعال است.", 403);
     await createSession(user.id);
     attempts.delete(key);

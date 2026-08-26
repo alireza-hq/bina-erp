@@ -44,7 +44,13 @@ export function LoginForm() {
         <label htmlFor="username">نام کاربری</label>
         <div className="input-shell">
           <UserRound size={18} />
-          <input id="username" dir="ltr" autoComplete="username" {...register("username")} />
+          <input
+            id="username"
+            dir="ltr"
+            autoComplete="username"
+            placeholder="نام کاربری سازمانی"
+            {...register("username")}
+          />
         </div>
         {errors.username && <p className="field-error">{errors.username.message}</p>}
       </div>
@@ -57,6 +63,7 @@ export function LoginForm() {
             type="password"
             dir="ltr"
             autoComplete="current-password"
+            placeholder="رمز عبور"
             {...register("password")}
           />
         </div>

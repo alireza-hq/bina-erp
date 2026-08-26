@@ -7,7 +7,7 @@ import { userAdminSchema } from "@/lib/validation";
 export async function PATCH(request: Request, context: RouteContext<"/api/admin/users/[id]">) {
   if (!hasSameOrigin(request)) return jsonError("درخواست غیرمجاز است", 403);
   const actor = await getCurrentUser();
-  if (actor?.role !== "super_admin") return jsonError("دسترسی کافی ندارید", 403);
+  if (actor?.role !== "admin") return jsonError("دسترسی کافی ندارید", 403);
   const { id } = await context.params;
   if (id === actor.id) return jsonError("نقش یا وضعیت حساب خودتان قابل تغییر نیست");
   const parsed = await parseJson(request, userAdminSchema);

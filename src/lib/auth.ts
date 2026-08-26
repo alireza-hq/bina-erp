@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, count, eq, gt } from "drizzle-orm";
+import { and, eq, gt, or } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
@@ -34,12 +34,16 @@ function verifySignedToken(value: string) {
 
 export async function syncDirectoryUser(directoryUser: DirectoryUser) {
   const existing = await db.query.users.findFirst({
-    where: eq(users.ldapId, directoryUser.ldapId),
+    where: or(
+      eq(users.ldapId, directoryUser.ldapId),
+      eq(users.username, directoryUser.username.toLowerCase()),
+    ),
   });
   if (existing) {
     const [updated] = await db
       .update(users)
       .set({
+        ldapId: directoryUser.ldapId,
         username: directoryUser.username,
         displayName: directoryUser.displayName,
         email: directoryUser.email,
@@ -50,14 +54,11 @@ export async function syncDirectoryUser(directoryUser: DirectoryUser) {
     return updated;
   }
   try {
-    return await db.transaction(async (tx) => {
-      const [{ total }] = await tx.select({ total: count() }).from(users);
-      const [created] = await tx
-        .insert(users)
-        .values({ ...directoryUser, role: Number(total) === 0 ? "super_admin" : "user" })
-        .returning();
-      return created;
-    });
+    const [created] = await db
+      .insert(users)
+      .values({ ...directoryUser, role: "user" })
+      .returning();
+    return created;
   } catch {
     const user = await db.query.users.findFirst({ where: eq(users.ldapId, directoryUser.ldapId) });
     if (!user) throw new Error("Unable to synchronize directory user");
@@ -116,7 +117,7 @@ export async function requireAdmin() {
   return user;
 }
 export function isAdmin(user: AppUser) {
-  return user.role === "admin" || user.role === "super_admin";
+  return user.role === "admin";
 }
 export async function getProjectPermission(
   user: AppUser,

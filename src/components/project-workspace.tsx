@@ -15,8 +15,10 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
+import { CustomSelect } from "@/components/custom-select";
+import { persianizeInputValue, toPersianDigits } from "@/lib/persian";
 import { clientFileSchema } from "@/lib/upload";
 import { letterFieldsSchema, sheetSchema } from "@/lib/validation";
 
@@ -118,6 +120,7 @@ function LetterEditor({
   const schema = formSchema(Boolean(letter));
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<LetterInput>({
@@ -182,38 +185,68 @@ function LetterEditor({
           <div className="form-grid">
             <div className="field">
               <label>شیت</label>
-              <select {...register("sheetId")}>
-                {sheets.map((sheet) => (
-                  <option value={sheet.id} key={sheet.id}>
-                    {sheet.name}
-                  </option>
-                ))}
-              </select>
+              <Controller
+                control={control}
+                name="sheetId"
+                render={({ field }) => (
+                  <CustomSelect
+                    ariaLabel="انتخاب شیت"
+                    value={field.value}
+                    options={sheets.map((sheet) => ({ value: sheet.id, label: sheet.name }))}
+                    onChange={field.onChange}
+                  />
+                )}
+              />
               {errors.sheetId && <p className="field-error">{errors.sheetId.message}</p>}
             </div>
             <div className="field">
               <label>تاریخ نامه</label>
-              <input type="date" dir="ltr" {...register("letterDate")} />
+              <input type="date" dir="ltr" aria-label="تاریخ نامه" {...register("letterDate")} />
               {errors.letterDate && <p className="field-error">{errors.letterDate.message}</p>}
             </div>
             <div className="field">
               <label>فرستنده / شرکت</label>
-              <input {...register("sender")} />
+              <input
+                placeholder="نام شخص یا شرکت فرستنده"
+                {...register("sender")}
+                onInput={(event) => {
+                  event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
+                }}
+              />
               {errors.sender && <p className="field-error">{errors.sender.message}</p>}
             </div>
             <div className="field">
               <label>گیرنده / شرکت</label>
-              <input {...register("recipient")} />
+              <input
+                placeholder="نام شخص یا شرکت گیرنده"
+                {...register("recipient")}
+                onInput={(event) => {
+                  event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
+                }}
+              />
               {errors.recipient && <p className="field-error">{errors.recipient.message}</p>}
             </div>
             <div className="field span-2">
               <label>موضوع</label>
-              <input {...register("subject")} />
+              <input
+                placeholder="موضوع نامه را وارد کنید"
+                {...register("subject")}
+                onInput={(event) => {
+                  event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
+                }}
+              />
               {errors.subject && <p className="field-error">{errors.subject.message}</p>}
             </div>
             <div className="field span-2">
               <label>توضیحات</label>
-              <textarea rows={3} {...register("description")} />
+              <textarea
+                rows={3}
+                placeholder="توضیحات تکمیلی (اختیاری)"
+                {...register("description")}
+                onInput={(event) => {
+                  event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
+                }}
+              />
               {errors.description && <p className="field-error">{errors.description.message}</p>}
             </div>
           </div>
@@ -294,7 +327,13 @@ function SheetCreator({ projectId, onDone }: { projectId: string; onDone: () => 
         onDone();
       })}
     >
-      <input placeholder="نام شیت جدید" {...register("name")} />
+      <input
+        placeholder="مثلاً نامه‌های ورودی"
+        {...register("name")}
+        onInput={(event) => {
+          event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
+        }}
+      />
       <button className="primary-button" disabled={isSubmitting}>
         <Plus size={16} />
         افزودن
@@ -427,7 +466,7 @@ export function ProjectWorkspace({
             <Search size={17} />
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => setQuery(persianizeInputValue(event.target.value))}
               placeholder="جستجو در این شیت…"
             />
           </div>
@@ -454,7 +493,7 @@ export function ProjectWorkspace({
                 <tr key={letter.id}>
                   <td className="sticky-index index-cell">{(index + 1).toLocaleString("fa-IR")}</td>
                   <td>{fileCell(letter, "letter")}</td>
-                  <td dir="ltr">{letter.letterDate}</td>
+                  <td dir="ltr">{toPersianDigits(letter.letterDate)}</td>
                   <td>{letter.sender}</td>
                   <td>{letter.recipient}</td>
                   <td className="subject-column">{letter.subject}</td>

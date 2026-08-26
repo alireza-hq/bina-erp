@@ -17,7 +17,7 @@ const bytea = customType<{ data: Buffer }>({
     return "bytea";
   },
 });
-export const userRole = pgEnum("user_role", ["super_admin", "admin", "user"]);
+export const userRole = pgEnum("user_role", ["admin", "user"]);
 export const projectPermission = pgEnum("project_permission", ["read", "write"]);
 export const fileKind = pgEnum("file_kind", ["letter", "paraph", "attachment"]);
 
@@ -29,7 +29,6 @@ export const users = pgTable(
     username: text("username").notNull().unique(),
     displayName: text("display_name").notNull(),
     email: text("email"),
-    passwordHash: text("password_hash"),
     role: userRole("role").notNull().default("user"),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

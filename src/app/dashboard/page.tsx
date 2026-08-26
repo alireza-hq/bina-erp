@@ -1,7 +1,7 @@
 import { asc, count, eq, inArray } from "drizzle-orm";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, FileText, FolderKanban, LockKeyhole, Pencil } from "lucide-react";
+import { ArrowLeft, FileText, FolderKanban } from "lucide-react";
 import { db } from "@/db";
 import { letters, projectPermissions, projects } from "@/db/schema";
 import { AppHeader } from "@/components/app-header";
@@ -44,18 +44,11 @@ export default async function DashboardPage() {
         {allowed.length ? (
           <div className="cards-grid">
             {allowed.map((project) => {
-              const permission = isAdmin(user)
-                ? "write"
-                : permissionRows.find((row) => row.projectId === project.id)?.permission;
               return (
                 <Link className="project-tile" href={`/projects/${project.id}`} key={project.id}>
                   <div className="tile-head">
                     <span className="tile-icon">
                       <FolderKanban size={21} />
-                    </span>
-                    <span className={`permission-pill ${permission}`}>
-                      {permission === "write" ? <Pencil size={12} /> : <LockKeyhole size={12} />}{" "}
-                      {permission === "write" ? "ویرایش" : "مشاهده"}
                     </span>
                   </div>
                   <div>

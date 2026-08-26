@@ -11,8 +11,10 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
+import { CustomSelect } from "@/components/custom-select";
+import { persianizeInputValue } from "@/lib/persian";
 import { permissionSchema, projectSchema } from "@/lib/validation";
 
 type User = {
@@ -20,7 +22,7 @@ type User = {
   username: string;
   displayName: string;
   email: string | null;
-  role: "super_admin" | "admin" | "user";
+  role: "admin" | "user";
   active: boolean;
 };
 type Project = { id: string; name: string; code: string };
@@ -59,12 +61,18 @@ function ProjectForm({ project, onDone }: { project?: Project; onDone: () => voi
     >
       <div className="field">
         <label>نام پروژه</label>
-        <input {...register("name")} />
+        <input
+          placeholder="مثلاً پروژه توسعه"
+          {...register("name")}
+          onInput={(event) => {
+            event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
+          }}
+        />
         {errors.name && <p className="field-error">{errors.name.message}</p>}
       </div>
       <div className="field">
         <label>کد پروژه</label>
-        <input dir="ltr" {...register("code")} />
+        <input dir="ltr" placeholder="مثلاً DEV-01" {...register("code")} />
         {errors.code && <p className="field-error">{errors.code.message}</p>}
       </div>
       <button className="primary-button" disabled={isSubmitting}>
@@ -87,32 +95,39 @@ function PermissionSelect({
 }) {
   const {
     register,
-    handleSubmit,
+    control,
     formState: { isSubmitting },
   } = useForm<z.input<typeof permissionSchema>>({
     resolver: zodResolver(permissionSchema),
     defaultValues: { userId: user.id, projectId: project.id, permission: value },
   });
   return (
-    <form
-      noValidate
-      className="permission-form"
-      onChange={handleSubmit(async (values) => {
-        await api("/api/admin/permissions", "PUT", values);
-        onDone();
-      })}
-    >
+    <form noValidate className="permission-form">
       <input type="hidden" {...register("userId")} />
       <input type="hidden" {...register("projectId")} />
-      <select
-        aria-label={`دسترسی ${user.displayName} به ${project.name}`}
-        disabled={isSubmitting || user.role !== "user"}
-        {...register("permission")}
-      >
-        <option value="none">بدون دسترسی</option>
-        <option value="read">مشاهده</option>
-        <option value="write">ویرایش</option>
-      </select>
+      <Controller
+        control={control}
+        name="permission"
+        render={({ field }) => (
+          <CustomSelect
+            ariaLabel={`دسترسی ${user.displayName} به ${project.name}`}
+            disabled={isSubmitting || user.role !== "user"}
+            value={field.value}
+            options={[
+              { value: "none", label: "بدون دسترسی" },
+              { value: "read", label: "مشاهده" },
+              { value: "write", label: "ویرایش" },
+            ]}
+            onChange={async (permission) => {
+              field.onChange(permission);
+              const values = { userId: user.id, projectId: project.id, permission };
+              if (!permissionSchema.safeParse(values).success) return;
+              await api("/api/admin/permissions", "PUT", values);
+              onDone();
+            }}
+          />
+        )}
+      />
     </form>
   );
 }
@@ -191,17 +206,17 @@ export function AdminPanel({
                 <span className={`status-dot ${user.active ? "on" : "off"}`}>
                   {user.active ? "فعال" : "غیرفعال"}
                 </span>
-                {actor.role === "super_admin" && user.id !== actor.id ? (
+                {user.id !== actor.id ? (
                   <>
-                    <select
+                    <CustomSelect
+                      ariaLabel={`نقش ${user.displayName}`}
                       value={user.role}
-                      onChange={(event) =>
-                        updateUser(user, { role: event.target.value as User["role"] })
-                      }
-                    >
-                      <option value="user">کاربر</option>
-                      <option value="admin">مدیر</option>
-                    </select>
+                      options={[
+                        { value: "user", label: "کاربر" },
+                        { value: "admin", label: "مدیر" },
+                      ]}
+                      onChange={(role) => updateUser(user, { role })}
+                    />
                     <button
                       className="subtle-button"
                       onClick={() => updateUser(user, { active: !user.active })}
@@ -212,11 +227,7 @@ export function AdminPanel({
                 ) : (
                   <span className="role-badge">
                     <ShieldCheck size={14} />
-                    {user.role === "super_admin"
-                      ? "مدیر ارشد"
-                      : user.role === "admin"
-                        ? "مدیر"
-                        : "کاربر"}
+                    {user.role === "admin" ? "مدیر" : "کاربر"}
                   </span>
                 )}
               </div>

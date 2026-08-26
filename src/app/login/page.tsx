@@ -17,10 +17,8 @@ export default async function LoginPage() {
         </div>
         <div className="auth-heading">
           <h1>ورود به سامانه</h1>
-          <p>با حساب سازمانی خود وارد شوید.</p>
         </div>
         <LoginForm />
-        <p className="auth-footnote">احراز هویت امن از طریق سرویس سازمانی</p>
       </section>
     </main>
   );

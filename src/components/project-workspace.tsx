@@ -7,6 +7,7 @@ import {
   FilePlus2,
   Files,
   MoreHorizontal,
+  Pencil,
   Plus,
   Search,
   Trash2,
@@ -14,10 +15,12 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { CustomSelect } from "@/components/custom-select";
+import { JalaliDatePicker } from "@/components/jalali-date-picker";
+import { formatJalaliDate } from "@/lib/jalali";
 import { persianizeInputValue, toPersianDigits } from "@/lib/persian";
 import { clientFileSchema } from "@/lib/upload";
 import { letterFieldsSchema, sheetSchema } from "@/lib/validation";
@@ -92,7 +95,11 @@ function FileField({
       <label htmlFor={name}>
         <Upload size={17} />
         <span>{label}</span>
-        <small>{current ? current.originalName : "PDF، تصویر، Word یا Excel · حداکثر ۱۵MB"}</small>
+        <small>
+          {current
+            ? toPersianDigits(current.originalName)
+            : "PDF، تصویر، Word یا Excel · حداکثر ۱۵MB"}
+        </small>
       </label>
       <input
         id={name}
@@ -164,8 +171,30 @@ function LetterEditor({
     }
   });
   const file = (kind: FileMeta["kind"]) => letter?.files.find((item) => item.kind === kind);
+  useEffect(() => {
+    function close(event: KeyboardEvent) {
+      if (
+        event.key === "Escape" &&
+        !document.querySelector(".custom-select-menu, .jalali-picker-popover")
+      )
+        onClose();
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", close);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", close);
+    };
+  }, [onClose]);
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) onClose();
+      }}
+    >
       <section
         className="modal"
         role="dialog"
@@ -192,7 +221,10 @@ function LetterEditor({
                   <CustomSelect
                     ariaLabel="انتخاب شیت"
                     value={field.value}
-                    options={sheets.map((sheet) => ({ value: sheet.id, label: sheet.name }))}
+                    options={sheets.map((sheet) => ({
+                      value: sheet.id,
+                      label: toPersianDigits(sheet.name),
+                    }))}
                     onChange={field.onChange}
                   />
                 )}
@@ -201,13 +233,22 @@ function LetterEditor({
             </div>
             <div className="field">
               <label>تاریخ نامه</label>
-              <input type="date" dir="ltr" aria-label="تاریخ نامه" {...register("letterDate")} />
+              <Controller
+                control={control}
+                name="letterDate"
+                render={({ field }) => (
+                  <JalaliDatePicker
+                    ariaLabel="انتخاب تاریخ نامه"
+                    value={field.value}
+                    onChange={field.onChange}
+                  />
+                )}
+              />
               {errors.letterDate && <p className="field-error">{errors.letterDate.message}</p>}
             </div>
             <div className="field">
               <label>فرستنده / شرکت</label>
               <input
-                placeholder="نام شخص یا شرکت فرستنده"
                 {...register("sender")}
                 onInput={(event) => {
                   event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
@@ -218,7 +259,6 @@ function LetterEditor({
             <div className="field">
               <label>گیرنده / شرکت</label>
               <input
-                placeholder="نام شخص یا شرکت گیرنده"
                 {...register("recipient")}
                 onInput={(event) => {
                   event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
@@ -229,7 +269,6 @@ function LetterEditor({
             <div className="field span-2">
               <label>موضوع</label>
               <input
-                placeholder="موضوع نامه را وارد کنید"
                 {...register("subject")}
                 onInput={(event) => {
                   event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
@@ -241,7 +280,6 @@ function LetterEditor({
               <label>توضیحات</label>
               <textarea
                 rows={3}
-                placeholder="توضیحات تکمیلی (اختیاری)"
                 {...register("description")}
                 onInput={(event) => {
                   event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
@@ -328,7 +366,6 @@ function SheetCreator({ projectId, onDone }: { projectId: string; onDone: () => 
       })}
     >
       <input
-        placeholder="مثلاً نامه‌های ورودی"
         {...register("name")}
         onInput={(event) => {
           event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
@@ -340,6 +377,103 @@ function SheetCreator({ projectId, onDone }: { projectId: string; onDone: () => 
       </button>
       {errors.name && <p className="field-error">{errors.name.message}</p>}
     </form>
+  );
+}
+function SheetRenameDialog({
+  projectId,
+  sheet,
+  onClose,
+  onDone,
+}: {
+  projectId: string;
+  sheet: Sheet;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [serverError, setServerError] = useState("");
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<z.input<typeof sheetSchema>>({
+    resolver: zodResolver(sheetSchema),
+    defaultValues: { name: sheet.name },
+  });
+  useEffect(() => {
+    function close(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", close);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", close);
+    };
+  }, [onClose]);
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) onClose();
+      }}
+    >
+      <section
+        className="modal sheet-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sheet-dialog-title"
+      >
+        <header>
+          <div>
+            <h2 id="sheet-dialog-title">تغییر نام شیت</h2>
+            <p>نام جدید شیت را وارد کنید.</p>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="بستن">
+            <X size={19} />
+          </button>
+        </header>
+        <form
+          noValidate
+          className="compact-form"
+          onSubmit={handleSubmit(async (values) => {
+            setServerError("");
+            try {
+              await request(
+                `/api/projects/${projectId}/sheets/${sheet.id}`,
+                "PATCH",
+                JSON.stringify(values),
+              );
+              onDone();
+            } catch (error) {
+              setServerError(error instanceof Error ? error.message : "تغییر نام انجام نشد");
+            }
+          })}
+        >
+          <div className="field">
+            <label>نام شیت</label>
+            <input
+              autoFocus
+              {...register("name")}
+              onInput={(event) => {
+                event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
+              }}
+            />
+            {errors.name && <p className="field-error">{errors.name.message}</p>}
+          </div>
+          {serverError && <div className="form-alert">{serverError}</div>}
+          <footer>
+            <button type="button" className="secondary-button" onClick={onClose}>
+              انصراف
+            </button>
+            <button className="primary-button" disabled={isSubmitting}>
+              ذخیره نام
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
   );
 }
 export function ProjectWorkspace({
@@ -358,6 +492,7 @@ export function ProjectWorkspace({
   const [query, setQuery] = useState("");
   const [editor, setEditor] = useState<Letter | "new" | null>(null);
   const [manageSheets, setManageSheets] = useState(false);
+  const [renameSheet, setRenameSheet] = useState<Sheet | null>(null);
   const visible = useMemo(
     () =>
       letters
@@ -377,7 +512,7 @@ export function ProjectWorkspace({
     router.refresh();
   }
   async function deleteSheet(sheet: Sheet) {
-    if (!confirm(`شیت «${sheet.name}» و همه نامه‌های آن حذف شود؟`)) return;
+    if (!confirm(`شیت «${toPersianDigits(sheet.name)}» و همه نامه‌های آن حذف شود؟`)) return;
     try {
       await request(`/api/projects/${project.id}/sheets/${sheet.id}`, "DELETE");
       setActive(sheets.find((item) => item.id !== sheet.id)?.id || "");
@@ -389,9 +524,13 @@ export function ProjectWorkspace({
   function fileCell(letter: Letter, kind: FileMeta["kind"]) {
     const file = letter.files.find((item) => item.kind === kind);
     return file ? (
-      <a className="file-link" href={`/api/files/${file.id}`} title={file.originalName}>
+      <a
+        className="file-link"
+        href={`/api/files/${file.id}`}
+        title={toPersianDigits(file.originalName)}
+      >
         <Download size={14} />
-        <span>{file.originalName}</span>
+        <span>{toPersianDigits(file.originalName)}</span>
       </a>
     ) : (
       <span className="empty-cell">—</span>
@@ -401,8 +540,8 @@ export function ProjectWorkspace({
     <>
       <div className="workspace-heading">
         <div>
-          <span className="project-code">{project.code}</span>
-          <h1>{project.name}</h1>
+          <span className="project-code">{toPersianDigits(project.code)}</span>
+          <h1>{toPersianDigits(project.name)}</h1>
           <p>
             {letters.length.toLocaleString("fa-IR")} نامه در {sheets.length.toLocaleString("fa-IR")}{" "}
             شیت
@@ -426,7 +565,7 @@ export function ProjectWorkspace({
               key={sheet.id}
             >
               <Files size={15} />
-              {sheet.name}
+              {toPersianDigits(sheet.name)}
             </button>
           ))}
         </div>
@@ -445,16 +584,25 @@ export function ProjectWorkspace({
               <div key={sheet.id}>
                 <span>
                   <Files size={15} />
-                  {sheet.name}
+                  {toPersianDigits(sheet.name)}
                 </span>
-                <button
-                  className="icon-button danger"
-                  onClick={() => deleteSheet(sheet)}
-                  disabled={sheets.length === 1}
-                  aria-label="حذف شیت"
-                >
-                  <Trash2 size={15} />
-                </button>
+                <div className="sheet-actions">
+                  <button
+                    className="icon-button"
+                    onClick={() => setRenameSheet(sheet)}
+                    aria-label="تغییر نام شیت"
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    onClick={() => deleteSheet(sheet)}
+                    disabled={sheets.length === 1}
+                    aria-label="حذف شیت"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -493,14 +641,18 @@ export function ProjectWorkspace({
                 <tr key={letter.id}>
                   <td className="sticky-index index-cell">{(index + 1).toLocaleString("fa-IR")}</td>
                   <td>{fileCell(letter, "letter")}</td>
-                  <td dir="ltr">{toPersianDigits(letter.letterDate)}</td>
-                  <td>{letter.sender}</td>
-                  <td>{letter.recipient}</td>
-                  <td className="subject-column">{letter.subject}</td>
+                  <td dir="ltr">{formatJalaliDate(letter.letterDate)}</td>
+                  <td>{toPersianDigits(letter.sender)}</td>
+                  <td>{toPersianDigits(letter.recipient)}</td>
+                  <td className="subject-column">{toPersianDigits(letter.subject)}</td>
                   <td>{fileCell(letter, "paraph")}</td>
                   <td>{fileCell(letter, "attachment")}</td>
                   <td className="description-column">
-                    {letter.description || <span className="empty-cell">—</span>}
+                    {letter.description ? (
+                      toPersianDigits(letter.description)
+                    ) : (
+                      <span className="empty-cell">—</span>
+                    )}
                   </td>
                   {canWrite && (
                     <td className="sticky-actions">
@@ -547,6 +699,17 @@ export function ProjectWorkspace({
           sheets={sheets}
           letter={editor === "new" ? undefined : editor}
           onClose={() => setEditor(null)}
+        />
+      )}
+      {renameSheet && (
+        <SheetRenameDialog
+          projectId={project.id}
+          sheet={renameSheet}
+          onClose={() => setRenameSheet(null)}
+          onDone={() => {
+            setRenameSheet(null);
+            router.refresh();
+          }}
         />
       )}
     </>

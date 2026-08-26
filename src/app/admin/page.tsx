@@ -32,7 +32,6 @@ export default async function AdminPage() {
             id: user.id,
             username: user.username,
             displayName: user.displayName,
-            email: user.email,
             role: user.role,
             active: user.active,
           }))}

@@ -1,7 +1,8 @@
 "use client";
 
 import { Check, ChevronDown } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 
 type Option<T extends string> = { value: T; label: string };
 
@@ -19,13 +20,16 @@ export function CustomSelect<T extends string>({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const root = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   const listId = useId();
   const selected = options.find((option) => option.value === value) ?? options[0];
 
   useEffect(() => {
     function close(event: PointerEvent) {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!root.current?.contains(target) && !menu.current?.contains(target)) setOpen(false);
     }
     function closeWithKeyboard(event: KeyboardEvent) {
       if (event.key === "Escape") setOpen(false);
@@ -37,6 +41,31 @@ export function CustomSelect<T extends string>({
       document.removeEventListener("keydown", closeWithKeyboard);
     };
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    function positionMenu() {
+      const rect = root.current?.getBoundingClientRect();
+      if (!rect) return;
+      const estimatedHeight = Math.min(options.length * 38 + 10, 240);
+      const opensUp = window.innerHeight - rect.bottom < estimatedHeight + 12;
+      setMenuStyle({
+        position: "fixed",
+        right: "auto",
+        bottom: "auto",
+        left: rect.left,
+        top: opensUp ? Math.max(8, rect.top - estimatedHeight - 6) : rect.bottom + 6,
+        width: rect.width,
+      });
+    }
+    positionMenu();
+    window.addEventListener("resize", positionMenu);
+    window.addEventListener("scroll", positionMenu, true);
+    return () => {
+      window.removeEventListener("resize", positionMenu);
+      window.removeEventListener("scroll", positionMenu, true);
+    };
+  }, [open, options.length]);
 
   return (
     <div className="custom-select" ref={root}>
@@ -60,25 +89,35 @@ export function CustomSelect<T extends string>({
         <span>{selected?.label}</span>
         <ChevronDown size={16} aria-hidden="true" />
       </button>
-      {open && (
-        <div className="custom-select-menu" id={listId} role="listbox" aria-label={ariaLabel}>
-          {options.map((option) => (
-            <button
-              type="button"
-              role="option"
-              aria-selected={option.value === value}
-              key={option.value}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              <span>{option.label}</span>
-              {option.value === value && <Check size={15} aria-hidden="true" />}
-            </button>
-          ))}
-        </div>
-      )}
+      {open &&
+        menuStyle.width !== undefined &&
+        createPortal(
+          <div
+            className="custom-select-menu"
+            id={listId}
+            role="listbox"
+            aria-label={ariaLabel}
+            ref={menu}
+            style={menuStyle}
+          >
+            {options.map((option) => (
+              <button
+                type="button"
+                role="option"
+                aria-selected={option.value === value}
+                key={option.value}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                <span>{option.label}</span>
+                {option.value === value && <Check size={15} aria-hidden="true" />}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

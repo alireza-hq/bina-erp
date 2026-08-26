@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { letters, projectPermissions, projects } from "@/db/schema";
 import { AppHeader } from "@/components/app-header";
 import { isAdmin, requireUser } from "@/lib/auth";
+import { toPersianDigits } from "@/lib/persian";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "پروژه‌ها" };
@@ -52,8 +53,8 @@ export default async function DashboardPage() {
                     </span>
                   </div>
                   <div>
-                    <span className="project-code">{project.code}</span>
-                    <h2>{project.name}</h2>
+                    <span className="project-code">{toPersianDigits(project.code)}</span>
+                    <h2>{toPersianDigits(project.name)}</h2>
                   </div>
                   <div className="tile-foot">
                     <span>

@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { loginSchema } from "@/lib/validation";
+import { persianizeInputValue, toLatinDigits } from "@/lib/persian";
 
 type LoginInput = z.input<typeof loginSchema>;
 export function LoginForm() {
@@ -25,7 +26,7 @@ export function LoginForm() {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
+        body: JSON.stringify({ ...values, username: toLatinDigits(values.username) }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -48,8 +49,10 @@ export function LoginForm() {
             id="username"
             dir="ltr"
             autoComplete="username"
-            placeholder="نام کاربری سازمانی"
             {...register("username")}
+            onInput={(event) => {
+              event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
+            }}
           />
         </div>
         {errors.username && <p className="field-error">{errors.username.message}</p>}
@@ -63,7 +66,6 @@ export function LoginForm() {
             type="password"
             dir="ltr"
             autoComplete="current-password"
-            placeholder="رمز عبور"
             {...register("password")}
           />
         </div>

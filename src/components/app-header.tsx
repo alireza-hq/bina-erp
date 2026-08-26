@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import { toPersianDigits } from "@/lib/persian";
 
 export function AppHeader({ user }: { user: { displayName: string; role: "admin" | "user" } }) {
   const pathname = usePathname();
@@ -41,9 +42,14 @@ export function AppHeader({ user }: { user: { displayName: string; role: "admin"
           )}
         </nav>
         <div className="account">
-          <span className="account-avatar">{user.displayName.slice(0, 1)}</span>
-          <span className="account-name">{user.displayName}</span>
-          <button className="icon-button" onClick={logout} disabled={busy} aria-label="خروج">
+          <span className="account-avatar">{toPersianDigits(user.displayName.slice(0, 1))}</span>
+          <span className="account-name">{toPersianDigits(user.displayName)}</span>
+          <button
+            className="icon-button signout-button"
+            onClick={logout}
+            disabled={busy}
+            aria-label="خروج"
+          >
             <LogOut size={18} />
           </button>
         </div>

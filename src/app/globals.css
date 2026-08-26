@@ -20,7 +20,11 @@ body {
   min-height: 100%;
 }
 body {
-  background: var(--canvas);
+  background-color: var(--canvas);
+  background-image: linear-gradient(#f6f7f9d9, #f6f7f9d9), url("/background.jpg");
+  background-position: center;
+  background-size: cover;
+  background-attachment: fixed;
   color: var(--ink);
   font-family: var(--font-vazirmatn), Tahoma, Arial, sans-serif;
   font-size: 14px;
@@ -155,7 +159,10 @@ textarea:focus {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: radial-gradient(circle at 50% -10%, #e8edf8 0, transparent 43%), var(--canvas);
+  background:
+    radial-gradient(circle at 50% -10%, #e8edf8c7 0, transparent 43%),
+    linear-gradient(#f6f7f9c9, #f6f7f9c9),
+    url("/background.jpg") center / cover fixed;
 }
 .auth-card {
   width: min(390px, 100%);
@@ -244,12 +251,13 @@ textarea:focus {
   backdrop-filter: blur(12px);
 }
 .topbar-inner {
-  width: min(1240px, calc(100% - 40px));
+  width: min(1560px, calc(100% - 32px));
   height: 100%;
   margin: auto;
   display: flex;
   align-items: center;
   gap: 36px;
+  direction: rtl;
 }
 .wordmark {
   display: flex;
@@ -290,6 +298,7 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 9px;
+  direction: ltr;
 }
 .account-avatar {
   display: grid;
@@ -300,10 +309,18 @@ textarea:focus {
   background: var(--navy-soft);
   color: var(--navy);
   font-weight: 800;
+  flex: none;
 }
 .account-name {
   font-size: 12px;
   font-weight: 700;
+}
+.signout-button {
+  color: #b53a47;
+}
+.signout-button:hover {
+  background: #fff0f2;
+  color: #d3293c;
 }
 .content {
   width: min(1240px, calc(100% - 40px));
@@ -392,9 +409,10 @@ textarea:focus {
   direction: ltr;
   margin-bottom: 6px;
   color: #65718a;
-  font:
-    700 10px ui-monospace,
-    monospace;
+  font-family: var(--font-vazirmatn), Tahoma, Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  unicode-bidi: plaintext;
 }
 .project-tile h2 {
   margin: 0;
@@ -498,6 +516,17 @@ textarea:focus {
   min-height: 70px;
   border-bottom: 1px solid #edf0f4;
 }
+.user-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 180px;
+}
+.user-identity strong {
+  font-size: 13px;
+  line-height: 1.5;
+}
 .admin-user:last-child,
 .project-admin-list > div:last-child {
   border-bottom: 0;
@@ -545,6 +574,37 @@ textarea:focus {
 .project-admin-list {
   padding: 8px 24px 16px;
 }
+.project-admin-list > div {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 76px;
+  padding: 8px 0;
+}
+.project-admin-list .tile-icon {
+  flex: none;
+}
+.project-admin-list .user-copy {
+  justify-content: center;
+  gap: 5px;
+}
+.project-admin-list .user-copy strong {
+  font-size: 13px;
+}
+.project-admin-code {
+  align-self: flex-start;
+  direction: ltr;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  unicode-bidi: plaintext;
+}
+.project-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
 .toast {
   position: fixed;
   bottom: 24px;
@@ -564,6 +624,7 @@ textarea:focus {
   scrollbar-gutter: stable;
 }
 .permission-table {
+  direction: rtl;
   width: max-content;
   min-width: 100%;
   border-collapse: separate;
@@ -582,6 +643,10 @@ textarea:focus {
   background: #f8f9fb;
   color: #5e697d;
   font-size: 11px;
+  text-align: right;
+}
+.permission-table th:not(:first-child) {
+  border-inline-start: 1px solid #e3e7ee;
 }
 .permission-table th:first-child,
 .permission-table td:first-child {
@@ -638,9 +703,7 @@ textarea:focus {
   transform: rotate(180deg);
 }
 .custom-select-menu {
-  position: absolute;
-  inset: calc(100% + 6px) 0 auto;
-  z-index: 60;
+  z-index: 120;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -649,6 +712,7 @@ textarea:focus {
   border-radius: 10px;
   background: #fff;
   box-shadow: 0 14px 38px #17255420;
+  direction: rtl;
 }
 .custom-select-menu button {
   min-height: 35px;
@@ -673,7 +737,8 @@ textarea:focus {
   width: 122px;
 }
 .permission-form .custom-select {
-  min-width: 145px;
+  width: 160px;
+  min-width: 160px;
 }
 .workspace-heading {
   display: flex;
@@ -741,25 +806,44 @@ textarea:focus {
 .sheet-list {
   display: flex;
   flex: 1;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 .sheet-list > div {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 42px;
-  padding-right: 12px;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: max-content;
+  height: 44px;
+  padding-right: 13px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fafbfc;
-  font-size: 11px;
+  font-size: 13px;
+  font-weight: 700;
 }
 .sheet-list span {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.sheet-list span svg {
+  flex: none;
+}
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sheet-actions .icon-button {
+  width: 32px;
+  height: 32px;
 }
 .table-surface {
   margin-top: 20px;
@@ -810,6 +894,7 @@ textarea:focus {
   scrollbar-gutter: stable;
 }
 .letters-table {
+  direction: rtl;
   width: max-content;
   min-width: 100%;
   border-collapse: separate;
@@ -833,6 +918,10 @@ textarea:focus {
   background: #f7f8fa;
   color: #5b667a;
   font-weight: 750;
+  text-align: right;
+}
+.letters-table th:not(:first-child) {
+  border-inline-start: 1px solid #e0e5ec;
 }
 .letters-table tbody tr:hover td {
   background: #fafbfc;
@@ -920,6 +1009,121 @@ textarea:focus {
   border-radius: 14px;
   background: #fff;
   box-shadow: 0 28px 90px #10182842;
+}
+.project-modal {
+  width: min(520px, 100%);
+}
+.sheet-modal {
+  width: min(460px, 100%);
+}
+.jalali-date-picker {
+  position: relative;
+}
+.jalali-date-trigger {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid #d9dee8;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--ink);
+}
+.jalali-date-trigger:hover,
+.jalali-date-trigger[aria-expanded="true"] {
+  border-color: #7083b2;
+  box-shadow: 0 0 0 3px #536ba51a;
+}
+.jalali-date-trigger svg {
+  color: #71809a;
+}
+.jalali-picker-popover {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 90;
+  width: min(310px, calc(100vw - 44px));
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 18px 48px #17255424;
+  direction: rtl;
+}
+.jalali-picker-head {
+  display: grid;
+  grid-template-columns: 34px 1fr 34px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.jalali-picker-head strong {
+  text-align: center;
+  font-size: 13px;
+}
+.jalali-picker-head button,
+.jalali-days button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #48556d;
+}
+.jalali-picker-head button {
+  width: 34px;
+  height: 34px;
+}
+.jalali-picker-head button:hover,
+.jalali-days button:hover {
+  background: var(--navy-soft);
+  color: var(--navy);
+}
+.jalali-weekdays,
+.jalali-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+.jalali-weekdays span {
+  padding: 5px 0;
+  color: #8791a3;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
+.jalali-days button,
+.jalali-days > span {
+  aspect-ratio: 1;
+}
+.jalali-days button {
+  font-size: 11px;
+  font-weight: 700;
+}
+.jalali-days button.active {
+  background: var(--navy);
+  color: #fff;
+}
+.jalali-today {
+  width: 100%;
+  min-height: 32px;
+  margin-top: 9px;
+  border: 0;
+  border-top: 1px solid #edf0f4;
+  background: transparent;
+  color: var(--navy);
+  font-size: 11px;
+  font-weight: 800;
+}
+@media (min-width: 1000px) {
+  .workspace-heading h1 {
+    font-size: 36px;
+    font-weight: 900;
+    letter-spacing: -0.8px;
+  }
 }
 .modal > header {
   position: sticky;

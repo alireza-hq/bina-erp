@@ -4,24 +4,25 @@ import {
   FolderKanban,
   KeyRound,
   Pencil,
+  Plus,
   Save,
   ShieldCheck,
   Trash2,
   UsersRound,
+  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { CustomSelect } from "@/components/custom-select";
-import { persianizeInputValue } from "@/lib/persian";
+import { persianizeInputValue, toPersianDigits } from "@/lib/persian";
 import { permissionSchema, projectSchema } from "@/lib/validation";
 
 type User = {
   id: string;
   username: string;
   displayName: string;
-  email: string | null;
   role: "admin" | "user";
   active: boolean;
 };
@@ -37,32 +38,46 @@ async function api(url: string, method: string, body?: unknown) {
   if (!response.ok) throw new Error(result.message || "عملیات انجام نشد");
   return result;
 }
-function ProjectForm({ project, onDone }: { project?: Project; onDone: () => void }) {
+function ProjectForm({
+  project,
+  onDone,
+  onCancel,
+}: {
+  project?: Project;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [serverError, setServerError] = useState("");
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<z.input<typeof projectSchema>>({
     resolver: zodResolver(projectSchema),
-    defaultValues: { name: project?.name || "", code: project?.code || "" },
+    defaultValues: { name: project?.name || "", code: toPersianDigits(project?.code || "") },
   });
   return (
     <form
       noValidate
       className="compact-form"
       onSubmit={handleSubmit(async (values) => {
-        await api(
-          project ? `/api/admin/projects/${project.id}` : "/api/admin/projects",
-          project ? "PATCH" : "POST",
-          values,
-        );
-        onDone();
+        setServerError("");
+        try {
+          await api(
+            project ? `/api/admin/projects/${project.id}` : "/api/admin/projects",
+            project ? "PATCH" : "POST",
+            values,
+          );
+          onDone();
+        } catch (error) {
+          setServerError(error instanceof Error ? error.message : "عملیات انجام نشد");
+        }
       })}
     >
       <div className="field">
         <label>نام پروژه</label>
         <input
-          placeholder="مثلاً پروژه توسعه"
+          autoFocus
           {...register("name")}
           onInput={(event) => {
             event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
@@ -72,13 +87,25 @@ function ProjectForm({ project, onDone }: { project?: Project; onDone: () => voi
       </div>
       <div className="field">
         <label>کد پروژه</label>
-        <input dir="ltr" placeholder="مثلاً DEV-01" {...register("code")} />
+        <input
+          dir="ltr"
+          {...register("code")}
+          onInput={(event) => {
+            event.currentTarget.value = persianizeInputValue(event.currentTarget.value);
+          }}
+        />
         {errors.code && <p className="field-error">{errors.code.message}</p>}
       </div>
-      <button className="primary-button" disabled={isSubmitting}>
-        <Save size={16} />
-        {project ? "ذخیره" : "افزودن پروژه"}
-      </button>
+      {serverError && <div className="form-alert">{serverError}</div>}
+      <footer>
+        <button type="button" className="secondary-button" onClick={onCancel}>
+          انصراف
+        </button>
+        <button className="primary-button" disabled={isSubmitting}>
+          <Save size={16} />
+          {project ? "ذخیره" : "افزودن پروژه"}
+        </button>
+      </footer>
     </form>
   );
 }
@@ -144,11 +171,24 @@ export function AdminPanel({
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<"users" | "projects" | "access">("users");
-  const [editing, setEditing] = useState<Project | null>(null);
+  const [projectEditor, setProjectEditor] = useState<Project | "new" | null>(null);
   const [message, setMessage] = useState("");
+  useEffect(() => {
+    if (!projectEditor) return;
+    function close(event: KeyboardEvent) {
+      if (event.key === "Escape") setProjectEditor(null);
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", close);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", close);
+    };
+  }, [projectEditor]);
   function done(text = "تغییرات ذخیره شد") {
     setMessage(text);
-    setEditing(null);
+    setProjectEditor(null);
     router.refresh();
     setTimeout(() => setMessage(""), 2500);
   }
@@ -161,7 +201,7 @@ export function AdminPanel({
     }
   }
   async function removeProject(project: Project) {
-    if (!confirm(`پروژه «${project.name}» و تمام نامه‌های آن حذف شود؟`)) return;
+    if (!confirm(`پروژه «${toPersianDigits(project.name)}» و تمام نامه‌های آن حذف شود؟`)) return;
     try {
       await api(`/api/admin/projects/${project.id}`, "DELETE");
       done("پروژه حذف شد");
@@ -190,18 +230,19 @@ export function AdminPanel({
         <section className="surface">
           <div className="surface-head">
             <div>
-              <h2>کاربران سازمانی</h2>
-              <p>کاربران پس از اولین ورود LDAP در این فهرست ظاهر می‌شوند.</p>
+              <h2>مدیریت کاربران</h2>
+              <p>نقش و وضعیت حساب‌های سازمانی را از این بخش مدیریت کنید.</p>
             </div>
             <span className="count-badge">{users.length.toLocaleString("fa-IR")}</span>
           </div>
           <div className="user-list">
             {users.map((user) => (
               <div className="admin-user" key={user.id}>
-                <span className="account-avatar">{user.displayName.slice(0, 1)}</span>
-                <div className="user-copy">
-                  <strong>{user.displayName}</strong>
-                  <span dir="ltr">{user.email || user.username}</span>
+                <div className="user-identity">
+                  <span className="account-avatar">
+                    {toPersianDigits(user.displayName.slice(0, 1))}
+                  </span>
+                  <strong>{toPersianDigits(user.displayName)}</strong>
                 </div>
                 <span className={`status-dot ${user.active ? "on" : "off"}`}>
                   {user.active ? "فعال" : "غیرفعال"}
@@ -236,35 +277,17 @@ export function AdminPanel({
         </section>
       )}
       {tab === "projects" && (
-        <div className="admin-layout">
-          <section className="surface form-surface">
-            <div className="surface-head">
-              <div>
-                <h2>{editing ? "ویرایش پروژه" : "پروژه جدید"}</h2>
-                <p>
-                  {editing
-                    ? "نام و کد پروژه را اصلاح کنید."
-                    : "برای پروژه، اولین شیت خودکار ساخته می‌شود."}
-                </p>
-              </div>
-              {editing && (
-                <button className="icon-button" onClick={() => setEditing(null)}>
-                  ×
-                </button>
-              )}
-            </div>
-            <ProjectForm
-              key={editing?.id || "new"}
-              project={editing || undefined}
-              onDone={() => done(editing ? "پروژه ویرایش شد" : "پروژه ساخته شد")}
-            />
-          </section>
-          <section className="surface">
+        <>
+          <section className="surface project-management">
             <div className="surface-head">
               <div>
                 <h2>همه پروژه‌ها</h2>
-                <p>مدیریت اطلاعات و حذف پروژه‌ها</p>
+                <p>پروژه‌ها را ایجاد، ویرایش یا حذف کنید.</p>
               </div>
+              <button className="primary-button" onClick={() => setProjectEditor("new")}>
+                <Plus size={16} />
+                پروژه جدید
+              </button>
             </div>
             <div className="project-admin-list">
               {projects.map((project) => (
@@ -273,28 +296,74 @@ export function AdminPanel({
                     <FolderKanban size={18} />
                   </span>
                   <div className="user-copy">
-                    <strong>{project.name}</strong>
-                    <span dir="ltr">{project.code}</span>
+                    <strong>{toPersianDigits(project.name)}</strong>
+                    <span className="project-admin-code">{toPersianDigits(project.code)}</span>
                   </div>
-                  <button
-                    className="icon-button"
-                    onClick={() => setEditing(project)}
-                    aria-label="ویرایش"
-                  >
-                    <Pencil size={16} />
-                  </button>
-                  <button
-                    className="icon-button danger"
-                    onClick={() => removeProject(project)}
-                    aria-label="حذف"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="project-row-actions">
+                    <button
+                      className="icon-button"
+                      onClick={() => setProjectEditor(project)}
+                      aria-label="ویرایش"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      className="icon-button danger"
+                      onClick={() => removeProject(project)}
+                      aria-label="حذف"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </section>
-        </div>
+          {projectEditor && (
+            <div
+              className="modal-backdrop"
+              role="presentation"
+              onMouseDown={(event) => {
+                if (event.currentTarget === event.target) setProjectEditor(null);
+              }}
+            >
+              <section
+                className="modal project-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="project-dialog-title"
+              >
+                <header>
+                  <div>
+                    <h2 id="project-dialog-title">
+                      {projectEditor === "new" ? "پروژه جدید" : "ویرایش پروژه"}
+                    </h2>
+                    <p>
+                      {projectEditor === "new"
+                        ? "پس از ایجاد پروژه، اولین شیت خودکار ساخته می‌شود."
+                        : "نام و کد پروژه را اصلاح کنید."}
+                    </p>
+                  </div>
+                  <button
+                    className="icon-button"
+                    onClick={() => setProjectEditor(null)}
+                    aria-label="بستن"
+                  >
+                    <X size={19} />
+                  </button>
+                </header>
+                <ProjectForm
+                  key={projectEditor === "new" ? "new" : projectEditor.id}
+                  project={projectEditor === "new" ? undefined : projectEditor}
+                  onCancel={() => setProjectEditor(null)}
+                  onDone={() =>
+                    done(projectEditor === "new" ? "پروژه ساخته شد" : "پروژه ویرایش شد")
+                  }
+                />
+              </section>
+            </div>
+          )}
+        </>
       )}
       {tab === "access" && (
         <section className="surface">
@@ -313,7 +382,7 @@ export function AdminPanel({
                 <tr>
                   <th>کاربر</th>
                   {projects.map((project) => (
-                    <th key={project.id}>{project.name}</th>
+                    <th key={project.id}>{toPersianDigits(project.name)}</th>
                   ))}
                 </tr>
               </thead>
@@ -321,8 +390,8 @@ export function AdminPanel({
                 {users.map((user) => (
                   <tr key={user.id}>
                     <td>
-                      <strong>{user.displayName}</strong>
-                      <small>{user.username}</small>
+                      <strong>{toPersianDigits(user.displayName)}</strong>
+                      <small>{toPersianDigits(user.username)}</small>
                     </td>
                     {projects.map((project) => {
                       const value =

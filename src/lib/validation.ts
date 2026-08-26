@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { toLatinDigits } from "@/lib/persian";
 
 export const loginSchema = z.object({
   username: z.string().trim().min(1, "نام کاربری را وارد کنید").max(128),
@@ -11,7 +12,8 @@ export const projectSchema = z.object({
     .trim()
     .min(1, "کد پروژه را وارد کنید")
     .max(40)
-    .regex(/^[A-Za-z0-9_-]+$/, "کد فقط می‌تواند شامل حروف انگلیسی، عدد، خط تیره و زیرخط باشد"),
+    .regex(/^[A-Za-z0-9۰-۹_-]+$/, "کد فقط می‌تواند شامل حروف انگلیسی، عدد، خط تیره و زیرخط باشد")
+    .transform(toLatinDigits),
 });
 export const sheetSchema = z.object({
   name: z.string().trim().min(1, "نام شیت را وارد کنید").max(80),
@@ -29,7 +31,10 @@ export const userAdminSchema = z
   .refine((value) => value.role !== undefined || value.active !== undefined);
 export const letterFieldsSchema = z.object({
   sheetId: z.string().uuid(),
-  letterDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "تاریخ معتبر نیست"),
+  letterDate: z
+    .string()
+    .regex(/^[0-9۰-۹]{4}-[0-9۰-۹]{2}-[0-9۰-۹]{2}$/, "تاریخ معتبر نیست")
+    .transform(toLatinDigits),
   sender: z.string().trim().min(1, "فرستنده را وارد کنید").max(200),
   recipient: z.string().trim().min(1, "گیرنده را وارد کنید").max(200),
   subject: z.string().trim().min(1, "موضوع را وارد کنید").max(500),

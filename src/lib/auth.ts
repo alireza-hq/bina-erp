@@ -141,11 +141,7 @@ export async function requireProjectAccess(projectId: string, write = false) {
   return { user, permission };
 }
 export function hasSameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  if (!origin) return false;
-  try {
-    return new URL(origin).host === new URL(request.url).host;
-  } catch {
-    return false;
-  }
+  // Temporarily disabled to allow access through LAN hostnames and IP addresses.
+  void request;
+  return true;
 }

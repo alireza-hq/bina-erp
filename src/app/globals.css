@@ -21,8 +21,8 @@ body {
 }
 body {
   background-color: var(--canvas);
-  background-image: linear-gradient(#f6f7f9d9, #f6f7f9d9), url("/background.jpg");
-  background-position: center center;
+  background-image: linear-gradient(#f6f7f9ad, #f6f7f9ad), url("/background.jpg");
+  background-position: center bottom;
   background-size: cover;
   background-attachment: fixed;
   color: var(--ink);
@@ -161,8 +161,8 @@ textarea:focus {
   padding: 24px;
   background:
     radial-gradient(circle at 50% -10%, #e8edf8c7 0, transparent 43%),
-    linear-gradient(#f6f7f9c9, #f6f7f9c9),
-    url("/background.jpg") center / cover fixed;
+    linear-gradient(#f6f7f9b5, #f6f7f9b5),
+    url("/background.jpg") center bottom / cover fixed;
 }
 .auth-card {
   width: min(390px, 100%);
@@ -294,22 +294,25 @@ textarea:focus {
   border-bottom-color: var(--navy);
 }
 .account {
+  position: relative;
   margin-right: auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px;
-  border: 1px solid #e4e8ef;
-  border-radius: 12px;
-  background: #fff;
   direction: rtl;
-  box-shadow: 0 3px 12px #1725540a;
 }
-.account-profile {
+.account-trigger {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding-inline: 2px 7px;
+  min-height: 44px;
+  padding: 4px 5px 4px 8px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink);
+  text-align: right;
+}
+.account-trigger:hover,
+.account-trigger[aria-expanded="true"] {
+  background: #ffffffa8;
 }
 .account-avatar {
   display: grid;
@@ -340,7 +343,28 @@ textarea:focus {
   color: var(--muted);
   font-size: 9px;
 }
+.account-chevron {
+  flex: none;
+  color: #7b8799;
+  transition: transform 0.15s;
+}
+.account-trigger[aria-expanded="true"] .account-chevron {
+  transform: rotate(180deg);
+}
+.account-menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 70;
+  width: 150px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 38px #17255420;
+}
 .signout-button {
+  width: 100%;
   min-height: 34px;
   display: inline-flex;
   align-items: center;
@@ -348,7 +372,7 @@ textarea:focus {
   padding: 0 10px;
   border: 0;
   border-radius: 8px;
-  background: #fff6f7;
+  background: transparent;
   color: #b53a47;
   font-size: 10px;
   font-weight: 800;

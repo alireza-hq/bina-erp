@@ -1,6 +1,5 @@
 "use client";
-import { ChevronDown, FolderKanban, LogOut, Settings2 } from "lucide-react";
-import Image from "next/image";
+import { ChevronDown, House, LogOut } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -10,6 +9,7 @@ export function AppHeader({ user }: { user: { displayName: string; role: "admin"
   const pathname = usePathname();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const [accountOpen, setAccountOpen] = useState(false);
   const account = useRef<HTMLDivElement>(null);
   const admin = user.role !== "user";
@@ -29,33 +29,35 @@ export function AppHeader({ user }: { user: { displayName: string; role: "admin"
   }, []);
   async function logout() {
     setBusy(true);
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-    router.replace("/login");
-    router.refresh();
+    try {
+      setError("");
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error("Logout failed");
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      setError("خروج انجام نشد. دوباره تلاش کنید.");
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <header className="topbar">
       <div className="topbar-inner">
         <Link href="/dashboard" className="wordmark">
-          <Image src="/logo.png" alt="بینا" width={44} height={50} priority />
+          سامانه گزارش کار کارکنان
         </Link>
         <nav className="main-nav" aria-label="ناوبری اصلی">
-          <Link
-            className={
-              pathname.startsWith("/dashboard") || pathname.startsWith("/projects") ? "active" : ""
-            }
-            href="/dashboard"
-          >
-            <FolderKanban size={17} />
-            پروژه‌ها
+          <Link className={pathname.startsWith("/dashboard") ? "active" : ""} href="/dashboard">
+            <House size={17} />
+            خانه
           </Link>
-          {admin && (
-            <Link className={pathname.startsWith("/admin") ? "active" : ""} href="/admin">
-              <Settings2 size={17} />
-              مدیریت
-            </Link>
-          )}
         </nav>
+        {error && (
+          <p role="alert" className="field-error">
+            {error}
+          </p>
+        )}
         <div className="account" ref={account}>
           <button
             type="button"

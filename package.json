@@ -1,5 +1,5 @@
 {
-  "name": "letter-list",
+  "name": "employee-work-reporting",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,10 +10,16 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "node --test tests/*.test.cjs",
+    "db:check": "node scripts/check-db.mjs",
+    "db:check-migrations": "node scripts/check-migrations.mjs",
+    "test:smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
+    "@next/env": "16.3.2",
     "drizzle-orm": "^0.45.2",
     "jalaali-js": "2.0.1",
     "ldapts": "^9.0.0",

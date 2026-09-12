@@ -8,27 +8,17 @@ const vazirmatn = localFont({
   display: "swap",
   weight: "100 900",
 });
-const description = "سامانه امن مدیریت پروژه‌ها، دسترسی کاربران و مکاتبات سازمانی";
+const description = "زیرساخت داخلی سامانه گزارش کار کارکنان";
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
-  title: { default: "بینا | مدیریت مکاتبات", template: "%s | بینا" },
+  title: { default: "سامانه گزارش کار کارکنان", template: "%s | سامانه گزارش کار کارکنان" },
   description,
-  applicationName: "بینا",
-  keywords: ["بینا", "مدیریت مکاتبات", "مدیریت نامه", "نامه سازمانی", "مدیریت پروژه"],
-  authors: [{ name: "بینا" }],
-  creator: "بینا",
-  publisher: "بینا",
+  applicationName: "سامانه گزارش کار کارکنان",
+  authors: [{ name: "سامانه گزارش کار کارکنان" }],
+  creator: "سامانه گزارش کار کارکنان",
+  publisher: "سامانه گزارش کار کارکنان",
   category: "business",
-  icons: {
-    icon: [
-      { url: "/brand/fav.png", type: "image/png" },
-      { url: "/brand/icons/favicon.ico" },
-      { url: "/brand/icons/android-chrome-192x192.png", sizes: "192x192", type: "image/png" },
-      { url: "/brand/icons/android-chrome-512x512.png", sizes: "512x512", type: "image/png" },
-    ],
-    shortcut: "/brand/icons/favicon.ico",
-    apple: [{ url: "/brand/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
-  },
+  icons: { icon: "/app-icon.svg" },
   formatDetection: { email: false, address: false, telephone: false },
   robots: {
     index: false,
@@ -40,16 +30,16 @@ export const metadata: Metadata = {
     type: "website",
     locale: "fa_IR",
     url: "/",
-    siteName: "بینا",
-    title: "بینا | مدیریت مکاتبات",
+    siteName: "سامانه گزارش کار کارکنان",
+    title: "سامانه گزارش کار کارکنان",
     description,
     images: [
-      { url: "/opengraph-image", width: 1200, height: 630, alt: "بینا؛ سامانه مدیریت مکاتبات" },
+      { url: "/opengraph-image", width: 1200, height: 630, alt: "سامانه گزارش کار کارکنان" },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "بینا | مدیریت مکاتبات",
+    title: "سامانه گزارش کار کارکنان",
     description,
     images: ["/twitter-image"],
   },

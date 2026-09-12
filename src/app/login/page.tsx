@@ -12,8 +12,14 @@ export default async function LoginPage() {
     <main className="auth-page">
       <section className="auth-card">
         <div className="auth-brand">
-          <Image src="/logo.png" alt="نشان بینا" width={62} height={70} priority />
-          <span>بینا</span>
+          <Image
+            src="/app-icon.svg"
+            alt="نشان سامانه گزارش کار کارکنان"
+            width={62}
+            height={70}
+            priority
+          />
+          <span>سامانه گزارش کار کارکنان</span>
         </div>
         <div className="auth-heading">
           <h1>ورود به سامانه</h1>

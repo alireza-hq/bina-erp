@@ -3,12 +3,12 @@ import { and, eq, gt, or } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { projectPermissions, sessions, users, type AppUser, type Permission } from "@/db/schema";
+import { sessions, users, type AppUser } from "@/db/schema";
 import type { DirectoryUser } from "./ldap";
 
 const COOKIE_NAME = "bina_session";
 const SESSION_DAYS = 7;
-const OWNER_ADMIN_USERNAME = "a.haghighi";
+
 function secret() {
   const value = process.env.JWT_SECRET;
   if (!value || value.length < 32)
@@ -120,28 +120,12 @@ export async function requireAdmin() {
 export function isAdmin(user: AppUser) {
   return user.role === "admin";
 }
-export function canDeleteProjects(user: Pick<AppUser, "username" | "role">) {
-  return user.role === "admin" && user.username.toLowerCase() === OWNER_ADMIN_USERNAME;
-}
-export async function getProjectPermission(
-  user: AppUser,
-  projectId: string,
-): Promise<Permission | null> {
-  if (isAdmin(user)) return "write";
-  const record = await db.query.projectPermissions.findFirst({
-    where: and(eq(projectPermissions.projectId, projectId), eq(projectPermissions.userId, user.id)),
-  });
-  return record?.permission ?? null;
-}
-export async function requireProjectAccess(projectId: string, write = false) {
-  const user = await getCurrentUser();
-  if (!user) return null;
-  const permission = await getProjectPermission(user, projectId);
-  if (!permission || (write && permission !== "write")) return null;
-  return { user, permission };
-}
 export function hasSameOrigin(request: Request) {
-  // Temporarily disabled to allow access through LAN hostnames and IP addresses.
-  void request;
-  return true;
+  const origin = request.headers.get("origin");
+  if (!origin || request.headers.get("sec-fetch-site") === "cross-site") return false;
+  const allowed = [new URL(request.url).origin];
+  // Explicit public URL supports TLS termination without trusting forwarded headers.
+  if (process.env.NEXT_PUBLIC_APP_URL)
+    allowed.push(new URL(process.env.NEXT_PUBLIC_APP_URL).origin);
+  return allowed.includes(origin);
 }

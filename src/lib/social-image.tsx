@@ -1,10 +1,5 @@
-/* eslint-disable @next/next/no-img-element */
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { ImageResponse } from "next/og";
 
-const logo = await readFile(path.join(process.cwd(), "public", "logo.png"), "base64");
-const logoSrc = `data:image/png;base64,${logo}`;
 export function createSocialImage() {
   return new ImageResponse(
     <div
@@ -41,7 +36,17 @@ export function createSocialImage() {
           boxShadow: "0 28px 70px rgba(0,0,0,.25)",
         }}
       >
-        <img src={logoSrc} alt="" width={260} height={294} style={{ objectFit: "contain" }} />
+        <div
+          style={{
+            display: "flex",
+            padding: 32,
+            color: "#172554",
+            fontSize: 48,
+            textAlign: "center",
+          }}
+        >
+          Employee Work Reporting System
+        </div>
       </div>
     </div>,
     { width: 1200, height: 630 },

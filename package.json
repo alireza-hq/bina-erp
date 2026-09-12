@@ -15,7 +15,10 @@
     "test": "node --test tests/*.test.cjs",
     "db:check": "node scripts/check-db.mjs",
     "db:check-migrations": "node scripts/check-migrations.mjs",
-    "test:smoke": "node scripts/smoke.mjs"
+    "test:smoke": "node scripts/smoke.mjs",
+    "admin:promote": "node scripts/bootstrap-admin.mjs",
+    "test:integration": "node --test tests/system.integration.cjs",
+    "test:system": "node scripts/smoke-system.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

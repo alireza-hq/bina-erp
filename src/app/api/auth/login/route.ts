@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     const user = await authenticateDirectoryUser(parsed.data.username, parsed.data.password).then(
       syncDirectoryUser,
     );
-    if (!user.active) return jsonError("این حساب غیرفعال است.", 403);
+    if (!user.isActive) return jsonError("این حساب غیرفعال است.", 403);
     await createSession(user.id);
     attempts.delete(key);
     return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });

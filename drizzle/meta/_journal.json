@@ -29,6 +29,13 @@
       "when": 1789201670153,
       "tag": "0003_retire_legacy_domain",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789202840183,
+      "tag": "0004_identity_and_master_data",
+      "breakpoints": true
     }
   ]
 }

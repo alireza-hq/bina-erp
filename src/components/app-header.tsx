@@ -4,15 +4,15 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { toPersianDigits } from "@/lib/persian";
+import { roleLabels, type AppRole } from "@/lib/roles";
 
-export function AppHeader({ user }: { user: { displayName: string; role: "admin" | "user" } }) {
+export function AppHeader({ user }: { user: { displayName: string; role: AppRole } }) {
   const pathname = usePathname();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [accountOpen, setAccountOpen] = useState(false);
   const account = useRef<HTMLDivElement>(null);
-  const admin = user.role !== "user";
   useEffect(() => {
     function close(event: PointerEvent) {
       if (!account.current?.contains(event.target as Node)) setAccountOpen(false);
@@ -52,6 +52,16 @@ export function AppHeader({ user }: { user: { displayName: string; role: "admin"
             <House size={17} />
             خانه
           </Link>
+          {user.role === "IT_ADMIN" &&
+            [
+              ["/system/users", "کاربران"],
+              ["/system/departments", "واحدها"],
+              ["/system/projects", "پروژه‌ها"],
+            ].map(([href, label]) => (
+              <Link key={href} href={href} className={pathname.startsWith(href) ? "active" : ""}>
+                {label}
+              </Link>
+            ))}
         </nav>
         {error && (
           <p role="alert" className="field-error">
@@ -69,7 +79,7 @@ export function AppHeader({ user }: { user: { displayName: string; role: "admin"
             <span className="account-avatar">{toPersianDigits(user.displayName.slice(0, 1))}</span>
             <span className="account-copy">
               <strong>{toPersianDigits(user.displayName)}</strong>
-              <small>{admin ? "مدیر" : "کاربر"}</small>
+              <small>{roleLabels[user.role]}</small>
             </span>
             <ChevronDown size={15} className="account-chevron" aria-hidden="true" />
           </button>

@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { sessions, users, type AppUser } from "@/db/schema";
 import type { DirectoryUser } from "./ldap";
+import type { AppRole } from "@/lib/roles";
+import { jsonError } from "@/lib/api";
 
 const COOKIE_NAME = "bina_session";
 const SESSION_DAYS = 7;
@@ -57,7 +59,7 @@ export async function syncDirectoryUser(directoryUser: DirectoryUser) {
   try {
     const [created] = await db
       .insert(users)
-      .values({ ...directoryUser, role: "user" })
+      .values({ ...directoryUser, role: "EMPLOYEE" })
       .returning();
     return created;
   } catch {
@@ -70,8 +72,11 @@ export async function createSession(userId: string) {
   const raw = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400000);
   await db.transaction(async (tx) => {
+    const [user] = await tx.select().from(users).where(eq(users.id, userId)).for("update");
+    if (!user?.isActive) throw new Error("Inactive or missing application user");
     await tx.delete(sessions).where(eq(sessions.userId, userId));
     await tx.insert(sessions).values({ tokenHash: digest(raw), userId, expiresAt });
+    await tx.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, userId));
   });
   (await cookies()).set(COOKIE_NAME, signedToken(raw), {
     httpOnly: true,
@@ -101,7 +106,7 @@ export async function getCurrentUser(): Promise<AppUser | null> {
       and(
         eq(sessions.tokenHash, digest(raw)),
         gt(sessions.expiresAt, new Date()),
-        eq(users.active, true),
+        eq(users.isActive, true),
       ),
     )
     .limit(1);
@@ -112,13 +117,18 @@ export async function requireUser() {
   if (!user) redirect("/login");
   return user;
 }
-export async function requireAdmin() {
+export async function requireRole(...roles: [AppRole, ...AppRole[]]) {
   const user = await requireUser();
-  if (user.role === "user") redirect("/dashboard");
+  if (!roles.includes(user.role)) redirect("/dashboard");
   return user;
 }
-export function isAdmin(user: AppUser) {
-  return user.role === "admin";
+export async function requireApiRole(request: Request, ...roles: [AppRole, ...AppRole[]]) {
+  if (!["GET", "HEAD"].includes(request.method) && !hasSameOrigin(request))
+    return { error: jsonError("درخواست غیرمجاز است", 403) } as const;
+  const user = await getCurrentUser();
+  if (!user) return { error: jsonError("ابتدا وارد سامانه شوید", 401) } as const;
+  if (!roles.includes(user.role)) return { error: jsonError("دسترسی کافی ندارید", 403) } as const;
+  return { user } as const;
 }
 export function hasSameOrigin(request: Request) {
   const origin = request.headers.get("origin");

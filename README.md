@@ -1,58 +1,101 @@
 # Employee Work Reporting System
 
-Phase 0 foundation only. No work-reporting business features or schema have been implemented.
+Phase 1 provides LDAP-backed identity, application roles, departments, projects and predefined project-file values. Employee work entries, HR reporting and analytics are not implemented.
 
-## Setup
+## Setup and migration
 
-Use Node.js 22 and pnpm 11.20.0. Copy `.env.example` to `.env` and configure PostgreSQL and your company directory. Keep the existing database name, cookie name and secret when upgrading.
+Use Node.js 22 and pnpm 11.20.0. Copy `.env.example` to `.env` and configure the directory and PostgreSQL connection. Preserve the existing database identity, session cookie name and secret when upgrading.
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm db:check
-# Review migration notes below before migrating an existing database.
+# Back up and review migrations before upgrading an existing installation.
 pnpm db:migrate
+pnpm db:check
 pnpm dev
 ```
 
-Production: `pnpm build`, then `pnpm start`. HTTPS is required for browser sessions because the production cookie is Secure. No Docker, Compose, Nginx or CI configuration exists in this repository.
+Production: `pnpm build`, then `pnpm start`. Production browser sessions require HTTPS. No Docker, Compose, Nginx or CI configuration is present in this repository.
 
-| Variable              | Purpose                                                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------------------ |
-| `DATABASE_URL`        | PostgreSQL URL; required by application and Drizzle CLI                                                |
-| `LDAP_URL`            | Directory endpoint; LDAPS verifies server certificates                                                 |
-| `LDAP_BASE_DN`        | Directory search base                                                                                  |
-| `LDAP_DOMAIN`         | Domain appended to bare usernames                                                                      |
-| `JWT_SECRET`          | At least 32 random characters; signs opaque tokens despite the historical name                         |
-| `NEXT_PUBLIC_APP_URL` | Exact public origin, including scheme/port; configure for reverse-proxy HTTPS termination and metadata |
+| Variable              | Purpose                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| `DATABASE_URL`        | PostgreSQL connection for application and CLI                                         |
+| `LDAP_URL`            | Directory endpoint; LDAPS validates server certificates                               |
+| `LDAP_BASE_DN`        | Directory search base                                                                 |
+| `LDAP_DOMAIN`         | Domain for binding bare usernames                                                     |
+| `JWT_SECRET`          | Random secret of at least 32 characters; signs opaque session tokens                  |
+| `NEXT_PUBLIC_APP_URL` | Exact public origin including scheme/port; configure behind HTTPS-terminating proxies |
 
-The CLI and diagnostic scripts load `.env` with Next.js environment loading. Never commit credentials. Changing `JWT_SECRET` invalidates existing cookies.
+Never log, store or commit LDAP passwords. CLI scripts use Next.js environment loading. Changing the session secret invalidates existing cookies.
 
-## Authentication and routes
+## Identity, roles and authorization
 
-LDAP binds with supplied credentials, searches the escaped account name, and always unbinds. Directory identity is synchronized into `users`. No LDAP password is logged or persisted. New users receive the `user` role; existing roles and active flags are preserved.
+LDAP authenticates and supplies username, display name, directory identity and email. LDAP sync only updates those directory fields; it never overwrites local role, department, employee code or active state. New users are `EMPLOYEE`. Employee codes are optional local data, not fabricated LDAP attributes. Last successful login is recorded when a session is created.
 
-Sessions last seven days. Only a SHA-256 token hash is stored in PostgreSQL. The cookie is HMAC-signed, HttpOnly, SameSite=Strict, and Secure in production. Login replaces previous sessions; logout deletes the session and cookie. Inactive users and expired sessions are rejected.
+| Role             | Phase 1 access                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| `EMPLOYEE`       | Authenticated dashboard                                                                              |
+| `BUSINESS_ADMIN` | Authenticated dashboard, recognized as business administrator; no IT permissions or reporting screen |
+| `IT_ADMIN`       | Dashboard; manage users, roles, departments, projects and project-file values                        |
 
-- `/` redirects according to the session.
-- `/login` retains the LDAP form and redirects authenticated users to `/dashboard`.
-- `/dashboard` calls `requireUser()` on the server and shows identity, placeholder text and logout.
-- `POST /api/auth/login` validates input and authenticates through LDAP.
-- `POST /api/auth/logout` revokes the current session; the UI reports failures and allows retry.
-- `PATCH /api/admin/users/[id]` retains the existing admin-only role/active management API. There is no admin page in Phase 0.
+`src/lib/roles.ts` is the canonical role definition used by PostgreSQL/Drizzle, Zod and UI. `requireUser()` protects authenticated pages; `requireRole(...roles)` protects role-specific pages; `requireApiRole(request, ...roles)` protects APIs. Anonymous APIs return 401; disallowed roles return 403. Every IT handler checks authorization, independent of navigation/layout visibility.
 
-There is no middleware/proxy auth layer. Server pages and handlers enforce authorization. Every Phase 1 API must authorize access explicitly; a layout alone does not protect APIs. Mutation requests require an Origin matching the request URL or configured public URL. LAN origins work without disabling this check. Forwarded host headers are not blindly trusted.
+Sessions remain seven-day signed, HttpOnly, SameSite=Strict cookies backed by hashed PostgreSQL tokens. Login rotates sessions. Every request checks current database role and active state. User deactivation revokes sessions; reactivation does not revive them. Session creation locks the user row and rechecks activation to serialize against deactivation. IT admins cannot demote or deactivate themselves. User mutations serialize with an advisory transaction lock and recheck the actor, preventing two administrators from simultaneously removing each other's access.
 
-## Database migration safety
+Mutation origins must match the request URL or configured public URL. Forwarded host headers are not blindly trusted. LDAP credentials alone never grant IT access.
 
-The active Drizzle schema contains only `users`, `sessions` and `user_role`. Historical migrations `0000`–`0002` remain unchanged for compatibility.
+## Bootstrap IT administrator
 
-`0003_retire_legacy_domain.sql` **does not drop data**. It moves `files`, `letters`, `project_permissions`, `sheets`, `projects`, `file_kind` and `project_permission` from `public` to `legacy_letter_list`. Data, uploaded bytes, indexes, constraints and foreign keys remain. `public.users` and `public.sessions` are untouched. The archive is outside the active application schema and is not a reporting schema.
+On an existing installation, genuine LDAP-provisioned `admin` users become `IT_ADMIN`; existing `user` users become `EMPLOYEE`. Active/inactive state and identity IDs are preserved. Unclaimed historical identities whose `ldap_id` starts with `pending:` become `EMPLOYEE`, including the old personal-account bootstrap. Historical SQL is retained for migration compatibility, but no personal username receives implicit privilege in the final schema or login code.
 
-Back up before applying; retire external consumers of old public table names and schedule for brief table locks. The database role needs schema creation and object ownership privileges. An existing archive schema causes failure rather than silently merging data. Existing privileges remain; archived letter references can prevent deletion of referenced users. Physically removing the archive is a separate destructive operation requiring explicit review.
+For a fresh installation, or controlled promotion of another administrator:
 
-The migration was prepared and validated but **not applied to the configured database**. The application works with either pre-archive or post-archive tables. A fresh database replays history before archiving. Historical migration `0002` provisions `a.haghighi` as admin and alters legacy roles; review this inherited policy before a fresh deployment. The previous README incorrectly claimed the first login became administrator.
+1. Apply migrations and let the selected person log in once with LDAP (as an employee).
+2. From a trusted operator shell with the correct `DATABASE_URL`, run `pnpm admin:promote canonical.username`.
+3. The existing active user becomes `IT_ADMIN`. Refresh the app; a new login is not required because roles are read from PostgreSQL.
 
-Rollback planning: move the five tables and two enums back to `public`, provided there are no name collisions. Coordinate app rollback and Drizzle journal state with the database operator; do not casually edit an applied journal. Do not use `drizzle-kit push` to delete the archive.
+The command does not create users, reactivate accounts, or promote pending bootstrap placeholders. It takes an explicit canonical username and requires database write access. Do not put LDAP passwords in the command. There is no automatic first-login promotion or hidden environment-based privilege assignment.
+
+## Administration
+
+Persian/RTL IT screens:
+
+- `/system/users`: search by username, display name or employee code; filter by role/status; edit role, department, employee code and activation. Directory-controlled names/email are read-only.
+- `/system/departments`: list/search, create, edit, activate/deactivate units.
+- `/system/projects`: list/search, create, edit, activate/deactivate projects.
+- `/system/projects/[id]`: project metadata and predefined project-file options. Each option has a code, display name and optional description. Examples include PID-001, MTO-004 and Vendor Doc 77. No uploads are implemented.
+
+Employees/business admins see dashboard navigation only. IT admins also see users, departments and projects. Dashboard shows identity, role, assigned department and neutral placeholder text; it has no fake statistics.
+
+Department names are unique among active departments after trimming/case normalization. Project codes are unique across active/inactive projects. Project-file codes are unique within a project, including inactive values. IDs and all mutation bodies are validated with strict Zod schemas. Duplicate values return a clear 409 instead of a database exception.
+
+Inactive departments cannot be newly assigned, but existing assignments can remain or be cleared. All values remain visible to IT. Inactive projects retain their files; creating or reactivating a file requires an active parent. Editing existing descriptions or deactivating values remains possible. Future work-entry selectors must filter both project and file activation. No hard-delete endpoints exist; relevant foreign keys use RESTRICT.
+
+## API routes
+
+All routes below require `IT_ADMIN`:
+
+| Route                                     | Methods   |
+| ----------------------------------------- | --------- |
+| `/api/admin/users`                        | GET       |
+| `/api/admin/users/[id]`                   | PATCH     |
+| `/api/admin/departments`                  | GET, POST |
+| `/api/admin/departments/[id]`             | PATCH     |
+| `/api/admin/projects`                     | GET, POST |
+| `/api/admin/projects/[id]`                | PATCH     |
+| `/api/admin/projects/[id]/files`          | GET, POST |
+| `/api/admin/projects/[id]/files/[fileId]` | PATCH     |
+
+The project ID is taken from the route; a file cannot be moved or updated through another project's URL. Login/logout remain `POST /api/auth/login` and `POST /api/auth/logout`. Old letter/sheet/upload/permission routes remain removed.
+
+## Database safety
+
+Active tables: `users`, `sessions`, `departments`, `projects`, `project_files`. Application `users.isActive` maps to the existing SQL column `active`; it was not renamed. New nullable user fields are `department_id`, `employee_code` and `last_login_at`.
+
+Migration `0003` archives the old domain in `legacy_letter_list` without dropping data. It must precede `0004`, which creates a new, unrelated `public.projects` table. The archive remains outside the active Drizzle domain. Migration `0004_identity_and_master_data.sql` backfills roles as documented above, replaces the enum, adds user metadata and creates the three master-data tables and indexes. Users and sessions are not deleted.
+
+These migrations were tested in isolated schemas and **were not applied to the configured application database during Phase 1**. Run `pnpm db:migrate` before using the new authenticated screens. `db:check` intentionally requires the Phase 1 columns and roles. Back up first, deploy code/schema together in a maintenance window, and account for migration table locks. Do not run old code against the new role enum. Rollback requires a reviewed reverse migration/backup strategy, including how BUSINESS_ADMIN maps back; no destructive down migration is supplied.
+
+Historical migrations `0000`–`0002` remain unchanged. They include the former named bootstrap and role changes. Fresh installs replay them, then `0004` removes pending-account privilege. Existing real administrators retain access. Archive deletion is a separate destructive operation; never use schema push to discard it.
 
 ## Validation
 
@@ -60,29 +103,20 @@ Rollback planning: move the five tables and two enums back to `public`, provided
 pnpm lint
 pnpm typecheck
 pnpm test
+pnpm test:integration
+pnpm db:check-migrations
+pnpm exec drizzle-kit check
 pnpm format:check
 pnpm build
-pnpm db:check
-pnpm exec drizzle-kit check
-pnpm db:check-migrations
+pnpm test:system
 ```
 
-`db:check` is read-only. `db:check-migrations` creates randomly named isolated schemas inside a transaction, replays migrations with fixture data, checks archive/auth preservation, then rolls back everything. It requires schema creation privileges and never migrates real application tables.
+- Unit/auth tests execute actual TypeScript modules with external boundaries mocked.
+- Integration tests execute actual authorization/auth/admin functions against PostgreSQL in isolated randomly named schemas; the whole transaction is rolled back.
+- Migration checks replay all migrations with legacy fixture rows and verify archive data, role backfills and session preservation, then roll back.
+- `test:system` needs a production build and free port 3101. It creates isolated schemas, starts the production server with that search path and fixture sessions, tests HTTP pages/APIs and removes only those schemas afterward. It never migrates real application tables. If forcibly terminated, inspect the `phase1_http_<uuid>`/matching archive schemas and remove only the abandoned test fixtures.
+- `test:smoke` targets an already running server on port 3100 (`SMOKE_BASE_URL` overrides). Optional `--authenticated` inserts/removes a temporary user/session in the configured application database; use only after migrating it.
 
-Start `pnpm start --port 3100`, then run `pnpm test:smoke`. Optional `pnpm test:smoke --authenticated` inserts a unique temporary user/session, checks shell/logout/replay rejection and removes the fixture in `finally`. No existing user is modified. If forcibly terminated, remove only the identified `phase0-test:<uuid>` user. `SMOKE_BASE_URL` selects another local server. Manually supplied cookies test server behavior; browser Secure-cookie behavior still requires HTTPS.
+The database test role needs schema creation privileges. Passwords are never needed for fixture sessions. These tests verify session/authorization behavior, not a successful real LDAP bind. Live company LDAP login/logout and visual browser QA remain deployment checks; no connected browser or LDAP test credentials were available in this session.
 
-`pnpm test` executes actual TypeScript modules with mocked LDAP/database/Next.js boundaries. A live successful LDAP login still requires a company account: log in, check identity, log out and verify `/dashboard` redirects to `/login`. Do not put passwords in command history or test fixtures.
-
-If an old dev build leaves stale types for deleted routes, stop that dev server, remove generated `.next/dev/types`, then rerun typecheck/build.
-
-## Phase 1 starting points
-
-- `src/app/dashboard/page.tsx`: minimal protected shell.
-- `src/components/app-header.tsx`, `src/app/layout.tsx`, `src/app/globals.css`: navigation, metadata, RTL styling and local font.
-- `src/lib/auth.ts`, `src/lib/ldap.ts`: preserve authentication/session boundaries.
-- `src/db/schema.ts`, `src/db/index.ts`, `drizzle.config.ts`: active schema and database tooling.
-- `src/lib/api.ts`, `src/lib/validation.ts`: errors and validation.
-- `src/components/custom-select.tsx`, `src/components/jalali-date-picker.tsx`, `src/lib/jalali.ts`, `src/lib/persian.ts`: reusable controls/localization.
-- `tests/auth.test.cjs`, `scripts/smoke.mjs`: regression checks.
-
-See [Phase 0 record](docs/phase-0.md) for inventory, changes, validation and remaining risks.
+See [Phase 1 record](docs/phase-1.md) and the historical [Phase 0 record](docs/phase-0.md).

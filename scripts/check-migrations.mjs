@@ -24,6 +24,7 @@ try {
         if (statement.trim()) await tx.unsafe(statement);
       }
       if (entry.idx === 2) {
+        await tx`insert into users (ldap_id, username, display_name, role) values ('CN=RealAdmin,DC=test', 'migration-admin', 'Admin', 'admin'), ('CN=Employee,DC=test', 'migration-employee', 'Employee', 'user')`;
         await tx`insert into projects (id, name, code) values ('00000000-0000-4000-8000-000000000001', 'Migration test', 'phase0')`;
         await tx`insert into sheets (id, project_id, name) values ('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', 'Test')`;
         await tx`insert into letters (id, project_id, sheet_id, letter_date, sender, recipient, subject, created_by) select '00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002', '2026-01-01', 'Test', 'Test', 'Test', id from users limit 1`;
@@ -43,13 +44,21 @@ try {
       await tx`select table_name from information_schema.tables where table_schema = ${scratch} order by table_name`;
     assert.deepEqual(
       tables.map((row) => row.table_name),
-      ["sessions", "users"],
+      ["departments", "project_files", "projects", "sessions", "users"],
     );
     // The archive's FK to users remains valid after moving the tables.
     const [owner] = await tx.unsafe(
       `SELECT count(*)::int AS count FROM "${archive}".letters l JOIN "${scratch}".users u ON u.id = l.created_by`,
     );
     assert.equal(owner.count, 1);
+    const migrated =
+      await tx`select username, role from users where username in ('migration-admin', 'migration-employee') order by username`;
+    assert.deepEqual(
+      migrated.map((u) => u.role),
+      ["IT_ADMIN", "EMPLOYEE"],
+    );
+    const [pending] = await tx`select role from users where ldap_id like 'pending:%'`;
+    assert.equal(pending.role, "EMPLOYEE");
     throw rollback;
   });
 } catch (error) {

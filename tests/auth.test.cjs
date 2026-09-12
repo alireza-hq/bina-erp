@@ -1,24 +1,8 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const ts = require("typescript");
 const { createHash } = require("node:crypto");
 
-// Execute the actual TypeScript modules with only external boundaries replaced.
-function load(file, mocks = {}) {
-  const source = ts.transpileModule(fs.readFileSync(file, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
-  const loaded = { exports: {} };
-  const localRequire = (name) => {
-    if (name in mocks) return mocks[name];
-    if (name.startsWith("@/")) return load(path.join("src", name.slice(2) + ".ts"), mocks);
-    return require(name);
-  };
-  new Function("require", "module", "exports", source)(localRequire, loaded, loaded.exports);
-  return loaded.exports;
-}
+const { load } = require("./helpers.cjs");
 
 function fixture() {
   process.env.JWT_SECRET = "test-only-secret-with-at-least-32-characters";
@@ -28,12 +12,12 @@ function fixture() {
     id: "user-1",
     username: "employee",
     displayName: "Employee",
-    active: true,
-    role: "user",
+    isActive: true,
+    role: "EMPLOYEE",
   };
   const schema = {
     sessions: { tokenHash: "tokenHash", userId: "userId", expiresAt: "expiresAt" },
-    users: { id: "id", active: "active", ldapId: "ldapId", username: "username" },
+    users: { id: "id", isActive: "isActive", ldapId: "ldapId", username: "username" },
   };
   const ops = {
     eq: (key, value) => (row) => row[key] === value,
@@ -49,6 +33,7 @@ function fixture() {
   };
   const db = {
     transaction: (fn) => fn(db),
+    update: () => ({ set: () => ({ where: async () => {} }) }),
     delete: () => ({
       where: async (condition) => {
         for (let i = rows.length - 1; i >= 0; i--) if (condition(rows[i])) rows.splice(i, 1);
@@ -56,16 +41,19 @@ function fixture() {
     }),
     insert: () => ({ values: async (row) => rows.push(row) }),
     select: () => ({
-      from: () => ({
-        innerJoin: () => ({
-          where: (condition) => ({
-            limit: async () =>
-              rows
-                .filter((row) => condition({ ...row, active: user.active }))
-                .map(() => ({ user })),
-          }),
-        }),
-      }),
+      from: (table) =>
+        table === schema.users
+          ? { where: () => ({ for: async () => [user] }) }
+          : {
+              innerJoin: () => ({
+                where: (condition) => ({
+                  limit: async () =>
+                    rows
+                      .filter((row) => condition({ ...row, isActive: user.isActive }))
+                      .map(() => ({ user })),
+                }),
+              }),
+            },
     }),
   };
   const mocks = {
@@ -88,7 +76,7 @@ function fixture() {
   return { auth: load("src/lib/auth.ts", mocks), mocks, jar, rows, user };
 }
 
-test("sessions: signed cookie, hashed storage, rotation, active/expired/tampered checks and logout", async () => {
+test("sessions: signed cookie, hashed storage, rotation, isActive/expired/tampered checks and logout", async () => {
   const { auth, jar, rows, user } = fixture();
   assert.equal(await auth.getCurrentUser(), null);
   await assert.rejects(auth.requireUser(), /redirect:\/login/);
@@ -102,9 +90,9 @@ test("sessions: signed cookie, hashed storage, rotation, active/expired/tampered
     createHash("sha256").update(first.value.split(".")[0]).digest("hex"),
   );
   assert.equal(await auth.requireUser(), user);
-  user.active = false;
+  user.isActive = false;
   assert.equal(await auth.getCurrentUser(), null);
-  user.active = true;
+  user.isActive = true;
   rows[0].expiresAt = new Date(0);
   assert.equal(await auth.getCurrentUser(), null);
   await auth.createSession(user.id);
@@ -225,10 +213,10 @@ test("login validates input, rejects bad/inactive accounts, rate limits and crea
   const logout = load("src/app/api/auth/logout/route.ts", mocks);
   assert.equal((await logout.POST(request({}))).status, 200);
   assert.equal(await f.auth.getCurrentUser(), null);
-  f.user.active = false;
+  f.user.isActive = false;
   assert.equal((await route.POST(request(input))).status, 403);
   assert.equal(f.rows.length, 0);
-  f.user.active = true;
+  f.user.isActive = true;
   invalid = true;
   for (let i = 0; i < 5; i++) {
     const response = await route.POST(request(input));
@@ -245,11 +233,11 @@ test("retained user administration API rejects anonymous and non-admin users", a
     new Request("http://localhost:3000/api/admin/users/other", {
       method: "PATCH",
       headers: { origin: "http://localhost:3000" },
-      body: JSON.stringify({ role: "admin" }),
+      body: JSON.stringify({ role: "IT_ADMIN" }),
     });
   assert.equal(
     (await route.PATCH(request(), { params: Promise.resolve({ id: "other" }) })).status,
-    403,
+    401,
   );
   await f.auth.createSession(f.user.id);
   assert.equal(

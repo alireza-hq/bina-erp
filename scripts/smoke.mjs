@@ -16,7 +16,6 @@ for (const path of [
   "/admin",
   "/projects/test",
   "/api/files/test",
-  "/api/admin/projects",
   "/api/admin/permissions",
   "/api/projects/test/letters",
   "/api/projects/test/sheets",
@@ -32,8 +31,9 @@ assert.equal((await request("/api/auth/login", post({ username: "", password: ""
 assert.equal((await request("/api/auth/login", post({}, "https://other.example"))).status, 403);
 assert.equal((await request("/api/auth/logout", { method: "GET" })).status, 405);
 assert.equal(
-  (await request("/api/admin/users/test", { ...post({ role: "admin" }), method: "PATCH" })).status,
-  403,
+  (await request("/api/admin/users/test", { ...post({ role: "IT_ADMIN" }), method: "PATCH" }))
+    .status,
+  401,
 );
 console.log("HTTP login, protected dashboard/API, origin checks and removed routes: PASS");
 

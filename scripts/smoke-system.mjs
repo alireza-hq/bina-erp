@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import nextEnv from "@next/env";
 import postgres from "postgres";
+import readWorkbook from "read-excel-file/node";
 
 nextEnv.loadEnvConfig(process.cwd());
 const root = postgres(process.env.DATABASE_URL, {
@@ -163,6 +164,37 @@ try {
   assert.equal(savedDay.totalHours, "6.50");
   assert.equal(savedDay.entries.length, 3);
   const companyQuery = `from=2026-01-03&to=2026-01-09&groupBy=project&groupBySecondary=employee`;
+  const exportPath = `/api/admin/reports/export?${companyQuery}&mode=details&page=5&pageSize=25`;
+  assert.equal((await request(exportPath)).status, 401);
+  assert.equal((await request(exportPath, "EMPLOYEE")).status, 403);
+  for (const role of ["BUSINESS_ADMIN", "IT_ADMIN"]) {
+    const response = await request(exportPath, role);
+    assert.equal(response.status, 200);
+    assert.match(
+      response.headers.get("content-disposition"),
+      /^attachment; filename="work-report-details-/,
+    );
+    const sheets = await readWorkbook(Buffer.from(await response.arrayBuffer()));
+    assert.equal(sheets[0].data.length, 4);
+    assert.equal(sheets[1].data.find((row) => row[0] === "جمع نفر-ساعت منبع")[1], 6.5);
+    const summary = await request(
+      `/api/admin/reports/export?${companyQuery}&mode=summary&groupPage=7`,
+      role,
+    );
+    assert.equal(summary.status, 200);
+    const grouped = await readWorkbook(Buffer.from(await summary.arrayBuffer()));
+    assert.equal(grouped[0].data.length, 2);
+    assert.equal(grouped[0].data[1].at(-1), 6.5);
+  }
+  assert.equal(
+    (await request("/api/admin/reports/export?mode=details&sort=unsafe", "BUSINESS_ADMIN")).status,
+    400,
+  );
+  assert.equal(
+    (await request("/api/admin/reports/export?mode=details&mode=summary", "BUSINESS_ADMIN")).status,
+    400,
+  );
+  assert.equal((await request(exportPath, "IT_ADMIN", "POST", {})).status, 405);
   assert.equal((await request("/admin/reports")).headers.get("location"), "/login");
   assert.equal((await request("/admin/reports", "EMPLOYEE")).headers.get("location"), "/dashboard");
   for (const path of ["/api/admin/reports", "/api/admin/reports/options?kind=employee"]) {
@@ -251,7 +283,7 @@ try {
   assert.equal((await request("/api/auth/logout", "IT_ADMIN", "POST", {})).status, 200);
   assert.equal((await request("/dashboard", "IT_ADMIN")).headers.get("location"), "/login");
   console.log(
-    "Production HTTP: administration, own work reports, decimal totals, concurrent saves, ownership, historical references, deactivation and logout PASS",
+    "Production HTTP: administration, company reporting, XLSX exports, own work reports, decimal totals, concurrent saves, ownership, historical references, deactivation and logout PASS",
   );
 } finally {
   if (server && server.exitCode === null) {

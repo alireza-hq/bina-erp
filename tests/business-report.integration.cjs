@@ -107,6 +107,21 @@ test("business reporting PostgreSQL: isolated relational and authorization check
       const { parseBusinessReportQuery: parse } = load("src/lib/business-report-query.ts");
       const base = { from: "2026-01-03", to: "2026-01-09" };
       const report = (changes) => service.getBusinessReport(parse({ ...base, ...changes }));
+      const workbook = load("src/lib/report-workbook.ts");
+      const readWorkbook = require("read-excel-file/node");
+      const exportApi = load("src/lib/report-export-api.ts", {
+        ...mocks,
+        "@/lib/auth": auth,
+        "@/lib/business-reports": service,
+      });
+      async function exported(changes = {}, mode = "details") {
+        const query = parse({ ...base, ...changes });
+        const result = await service.getBusinessReportExport(query, mode);
+        return {
+          result,
+          sheets: await readWorkbook(await workbook.createReportWorkbook(result, mode)),
+        };
+      }
       const cents = (value) => {
         const [whole, fraction = ""] = value.split(".");
         return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
@@ -200,6 +215,91 @@ test("business reporting PostgreSQL: isolated relational and authorization check
           );
         }
       });
+      await t.test("XLSX direct endpoint auth and exact filter/group parity", async () => {
+        for (const [actor, status] of [
+          [null, 401],
+          ["ali", 403],
+          ["business", 200],
+          ["it", 200],
+        ]) {
+          jar.clear();
+          if (actor) jar.set("bina_session", { value: cookies[actor] });
+          const response = await exportApi.reportExportApi(
+            new Request(
+              "http://localhost/api/admin/reports/export?mode=details&from=2026-01-03&to=2026-01-09",
+            ),
+          );
+          assert.equal(response.status, status);
+          if (status === 200) {
+            assert.match(
+              response.headers.get("content-disposition"),
+              /^attachment; filename="work-report-details-/,
+            );
+            assert.match(response.headers.get("content-type"), /spreadsheetml/);
+            assert.equal(response.headers.get("cache-control"), "private, no-store");
+            assert.equal(
+              (await readWorkbook(Buffer.from(await response.arrayBuffer())))[0].data.length,
+              5,
+            );
+          }
+        }
+        for (const filters of [
+          {},
+          { from: "2026-01-09", to: "2026-01-09" },
+          { employeeId: people.ali.id },
+          { departmentId: engineering.id },
+          { projectId: a.id },
+          { projectFileId: fb.id },
+          {
+            departmentId: engineering.id,
+            employeeId: people.ali.id,
+            projectId: a.id,
+            projectFileId: fa.id,
+          },
+          { projectId: a.id, projectFileId: fb.id },
+        ]) {
+          const screen = await report(filters),
+            out = await exported(filters);
+          assert.equal(out.sheets[0].data.length - 1, screen.entryCount);
+          assert.equal(
+            out.sheets[0].data
+              .slice(1)
+              .reduce((sum, r) => sum + BigInt(Math.round(r[9] * 100)), 0n),
+            cents(screen.totalHours),
+          );
+          assert.equal(
+            out.sheets[1].data.find((r) => r[0] === "جمع نفر-ساعت منبع")[1],
+            Number(screen.totalHours),
+          );
+        }
+        for (const [groupBy, groupBySecondary] of [
+          ["employee"],
+          ["department"],
+          ["project"],
+          ["projectFile"],
+          ["date"],
+          ["project", "employee"],
+          ["department", "project"],
+          ["employee", "projectFile"],
+        ]) {
+          const filter = { groupBy, groupBySecondary };
+          const screen = await report(filter),
+            out = await exported(filter, "summary");
+          assert.equal(out.sheets[0].data.length - 1, screen.groupCount);
+          assert.deepEqual(
+            out.sheets[0].data.slice(1).map((r) => r.at(-1)),
+            screen.groups.map((g) => Number(g.totalHours)),
+          );
+          assert.equal(
+            out.sheets[0].data
+              .slice(1)
+              .reduce((sum, r) => sum + BigInt(Math.round(r.at(-1) * 100)), 0n),
+            1050n,
+          );
+          if (groupBy === "projectFile")
+            assert.notEqual(out.sheets[0].data[1][0], out.sheets[0].data[2][0]);
+        }
+      });
       await t.test("historical inactive values and current department semantics", async () => {
         await tx
           .update(schema.users)
@@ -228,6 +328,9 @@ test("business reporting PostgreSQL: isolated relational and authorization check
         assert.equal((await report({ departmentId: hr.id })).entryCount, 4);
         const moved = await report({ groupBy: "department" });
         assert.equal(moved.groups.length, 1);
+        const history = await exported({ projectFileId: fb.id });
+        assert.equal(history.sheets[0].data[1][4], "HR");
+        assert.ok(history.sheets[0].data[1][7].includes("Project B"));
       });
       await t.test(
         "decimal precision and stable detail/group pagination independent of totals",
@@ -264,6 +367,9 @@ test("business reporting PostgreSQL: isolated relational and authorization check
             pages[0].entries.map((r) => r.id),
           );
           assert.equal((await report({ ...q, page: 4 })).entries.length, 0);
+          const allExport = await exported({ ...q, page: 3 });
+          assert.equal(allExport.sheets[0].data.length, 61);
+          assert.equal(allExport.result.totalHours, "40.00");
           assert.equal(cents((await report({ ...q, pageSize: 100 })).totalHours), 4000n);
           // Distinct groups greater than a page, with exact full primary totals repeated across pages.
           const extra = Array.from({ length: 30 }, (_, i) => ({
@@ -288,6 +394,9 @@ test("business reporting PostgreSQL: isolated relational and authorization check
           assert.equal(g1.groups.length, 25);
           assert.equal(g2.groups.length, 5);
           assert.equal(new Set([...g1.groups, ...g2.groups].map((g) => g.secondaryKey)).size, 30);
+          const groupExport = await exported({ ...grouped, groupPage: 2 }, "summary");
+          assert.equal(groupExport.sheets[0].data.length, 31);
+          assert.equal(groupExport.result.totalHours, "7.50");
           assert.ok([...g1.groups, ...g2.groups].every((g) => cents(g.primaryHours) === 750n));
           const nullGroup = await report({
             ...grouped,
@@ -326,6 +435,48 @@ test("business reporting PostgreSQL: isolated relational and authorization check
           plan[0]["QUERY PLAN"][0]["Execution Time"],
         );
       });
+      await t.test(
+        "export performance at 500/3000 rows and hard limit without truncation",
+        async () => {
+          for (const size of [500, 3000]) {
+            const date = size === 500 ? "2026-04-01" : "2026-04-02";
+            await tx.execute(
+              sql`INSERT INTO work_entries (employee_id,work_date,project_id,project_file_id,description,man_hours) SELECT ${people.it.id}::uuid,${date}::date,${a.id}::uuid,${fa.id}::uuid,'فعالیت آزمایشی',0.25 FROM generate_series(1,${size})`,
+            );
+            const query = parse({ ...base, from: date, to: date, pageSize: 25, page: 2 });
+            const memory = process.memoryUsage().rss,
+              start = performance.now();
+            const result = await service.getBusinessReportExport(query, "details"),
+              queried = performance.now();
+            const buffer = await workbook.createReportWorkbook(result, "details"),
+              finished = performance.now();
+            const sheets = await readWorkbook(buffer);
+            assert.equal(sheets[0].data.length, size + 1);
+            assert.equal(Number(result.totalHours), size * 0.25);
+            console.log(
+              JSON.stringify({
+                exportRows: size,
+                queryMs: Math.round(queried - start),
+                workbookMs: Math.round(finished - queried),
+                bytes: buffer.length,
+                rssDeltaMiB: Math.round((process.memoryUsage().rss - memory) / 1048576),
+              }),
+            );
+          }
+          await tx.execute(
+            sql`INSERT INTO work_entries (employee_id,work_date,project_id,project_file_id,description,man_hours) SELECT ${people.it.id}::uuid,DATE '2026-05-01',${a.id}::uuid,${fa.id}::uuid,'limit',0.25 FROM generate_series(1,20001)`,
+          );
+          for (const mode of ["details", "summary"])
+            await assert.rejects(
+              () =>
+                service.getBusinessReportExport(
+                  parse({ ...base, from: "2026-05-01", to: "2026-05-01" }),
+                  mode,
+                ),
+              /۲۰٬۰۰۰/,
+            );
+        },
+      );
       throw rollback;
     });
   } catch (error) {

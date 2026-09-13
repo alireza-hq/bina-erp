@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ZodError } from "zod";
 import { requireRole } from "@/lib/auth";
 import { BusinessReportFilters } from "@/components/business-report-filters";
+import { ReportExportActions } from "@/components/report-export-actions";
 import {
   REPORT_ROLES,
   parseBusinessReportQuery,
@@ -110,6 +111,7 @@ export default async function Page({ searchParams }: PageProps<"/admin/reports">
         لحاظ نمی‌شود.
       </p>
       <BusinessReportFilters key={JSON.stringify(query)} query={query} />
+      <ReportExportActions query={query} />
       <section className="admin-surface">
         <div className="report-summary">
           <strong>جمع کل فیلترشده: {hours(result.totalHours)} نفر-ساعت</strong>

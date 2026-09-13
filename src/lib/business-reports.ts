@@ -1,6 +1,12 @@
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  EXPORT_MAX_ROWS,
+  ReportExportLimitError,
+  exportModeSchema,
+  type ExportMode,
+} from "@/lib/report-export-query";
+import {
   workEntries as w,
   users as u,
   departments as d,
@@ -50,8 +56,13 @@ export type ReportEntry = {
   id: string;
   date: string;
   employee: string;
+  employeeName: string;
+  employeeCode: string | null;
+  username: string;
   department: string;
   project: string;
+  projectCode: string;
+  projectName: string;
   projectFile: string;
   description: string;
   manHours: string;
@@ -68,6 +79,12 @@ export type ReportGroup = {
   groupCount: string;
 };
 export async function getBusinessReport(input: BusinessReportQuery) {
+  return runBusinessReport(input);
+}
+export async function getBusinessReportExport(input: BusinessReportQuery, mode: ExportMode) {
+  return runBusinessReport(input, exportModeSchema.parse(mode));
+}
+async function runBusinessReport(input: BusinessReportQuery, exportMode?: ExportMode) {
   const q = businessReportSchema.parse(input);
   // One snapshot makes the paged rows, total and groups consistent during concurrent edits.
   return db.transaction(
@@ -76,12 +93,17 @@ export async function getBusinessReport(input: BusinessReportQuery) {
       const [total] = await tx.execute<{ totalHours: string; entryCount: string }>(
         sql`SELECT coalesce(sum(${w.manHours}),0)::text AS "totalHours", count(*)::text AS "entryCount" FROM ${source} WHERE ${where}`,
       );
-      const entries = await tx.execute<ReportEntry>(
-        sql`SELECT ${w.id} AS id, ${w.workDate}::text AS date, ${employeeLabel} AS employee, coalesce(${d.name}, 'بدون واحد') AS department, ${projectLabel} AS project, ${fileLabel} AS "projectFile", ${w.description} AS description, ${w.manHours}::text AS "manHours" FROM ${source} WHERE ${where} ORDER BY ${sortColumns[q.sort]} ${q.direction === "asc" ? sql`ASC` : sql`DESC`} NULLS LAST, ${u.displayName} ASC, ${w.id} ASC LIMIT ${q.pageSize} OFFSET ${(q.page - 1) * q.pageSize}`,
-      );
+      if (exportMode && BigInt(total.entryCount) > BigInt(EXPORT_MAX_ROWS))
+        throw new ReportExportLimitError();
+      const entries =
+        exportMode === "summary"
+          ? []
+          : await tx.execute<ReportEntry>(
+              sql`SELECT ${w.id} AS id, ${w.workDate}::text AS date, ${employeeLabel} AS employee, ${u.displayName} AS "employeeName", ${u.employeeCode} AS "employeeCode", ${u.username} AS username, coalesce(${d.name}, 'بدون واحد') AS department, ${projectLabel} AS project, ${p.code} AS "projectCode", ${p.name} AS "projectName", ${fileLabel} AS "projectFile", ${w.description} AS description, ${w.manHours}::text AS "manHours" FROM ${source} WHERE ${where} ORDER BY ${sortColumns[q.sort]} ${q.direction === "asc" ? sql`ASC` : sql`DESC`} NULLS LAST, ${u.displayName} ASC, ${w.id} ASC LIMIT ${exportMode ? EXPORT_MAX_ROWS : q.pageSize} OFFSET ${exportMode ? 0 : (q.page - 1) * q.pageSize}`,
+            );
       let groups: ReportGroup[] = [];
       let groupCount = 0;
-      if (q.groupBy) {
+      if (q.groupBy && exportMode !== "details") {
         const primary = dimensions[q.groupBy];
         const secondary = q.groupBySecondary
           ? dimensions[q.groupBySecondary]
@@ -92,10 +114,21 @@ export async function getBusinessReport(input: BusinessReportQuery) {
         );
         groupCount = Number(count.count);
         groups = await tx.execute<ReportGroup>(
-          sql`WITH grouped AS (${grouped}) SELECT "primaryKey", "primaryLabel", "secondaryKey", "secondaryLabel", hours::text AS "totalHours", entries::text AS "entryCount", (sum(hours) OVER (PARTITION BY "primaryKey"))::text AS "primaryHours", (sum(entries) OVER (PARTITION BY "primaryKey"))::text AS "primaryCount", count(*) OVER ()::text AS "groupCount" FROM grouped ORDER BY "primaryLabel", "primaryKey", "secondaryLabel", "secondaryKey" LIMIT ${q.pageSize} OFFSET ${(q.groupPage - 1) * q.pageSize}`,
+          sql`WITH grouped AS (${grouped}) SELECT "primaryKey", "primaryLabel", "secondaryKey", "secondaryLabel", hours::text AS "totalHours", entries::text AS "entryCount", (sum(hours) OVER (PARTITION BY "primaryKey"))::text AS "primaryHours", (sum(entries) OVER (PARTITION BY "primaryKey"))::text AS "primaryCount", count(*) OVER ()::text AS "groupCount" FROM grouped ORDER BY "primaryLabel", "primaryKey", "secondaryLabel", "secondaryKey" LIMIT ${exportMode ? EXPORT_MAX_ROWS : q.pageSize} OFFSET ${exportMode ? 0 : (q.groupPage - 1) * q.pageSize}`,
         );
       }
+      // Filter labels are resolved in the same snapshot, including filters matching zero rows.
+      let filterLabels: Record<string, string | null> = {};
+      if (exportMode) {
+        const [labels] = await tx.execute<Record<string, string | null>>(sql`SELECT
+          (SELECT ${employeeLabel} FROM ${u} WHERE ${u.id} = ${q.employeeId ?? null}::uuid) AS employee,
+          (SELECT ${d.name} FROM ${d} WHERE ${d.id} = ${q.departmentId ?? null}::uuid) AS department,
+          (SELECT ${projectLabel} FROM ${p} WHERE ${p.id} = ${q.projectId ?? null}::uuid) AS project,
+          (SELECT ${fileLabel} FROM ${f} JOIN ${p} ON ${f.projectId} = ${p.id} WHERE ${f.id} = ${q.projectFileId ?? null}::uuid) AS "projectFile"`);
+        filterLabels = labels;
+      }
       return {
+        filterLabels,
         query: q,
         totalHours: total.totalHours,
         entryCount: Number(total.entryCount),

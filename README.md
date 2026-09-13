@@ -1,6 +1,6 @@
 # Employee Work Reporting System
 
-Phase 3 adds weekly company reporting for business and IT administrators: combined filters, paginated details, exact totals and one/two-level grouping. Personal multi-row reporting, LDAP-backed identity and IT master data remain available. Exports, approvals, period locking, payroll and analytics dashboards are not implemented.
+Phase 4 adds detailed and grouped XLSX exports to weekly company reporting. Combined filters, paginated details, exact totals and one/two-level grouping remain available alongside personal work reporting, LDAP identity and IT master data. Approvals, period locking, payroll and analytics dashboards are not implemented.
 
 ## Setup and migration
 
@@ -105,6 +105,22 @@ GET `/api/admin/reports/options?kind=employee|department|project|projectFile` pr
 
 Migration `0006_business_reporting_date_index.sql` adds only `work_entries_date_idx` for company-wide date ranges. Existing employee/date, project/date and file indexes are retained; no summary tables or snapshots were introduced. Review and apply with `pnpm db:migrate`. See [Phase 3 record](docs/phase-3.md) for validation and limitations.
 
+## Reporting exports
+
+The two Excel buttons on `/admin/reports` download the **applied URL filters**, not unsaved changes in the filter form. GET `/api/admin/reports/export` accepts the same validated reporting parameters plus required `mode=details|summary`. It independently requires BUSINESS_ADMIN or IT_ADMIN; anonymous users receive 401 and EMPLOYEE receives 403. No export mutation route exists.
+
+Exports use the same service, predicate, join, sort and grouping definitions as the screen in one read-only repeatable-read snapshot. Validated `page`, `groupPage` and `pageSize` do not limit export rows. Detailed mode returns every matching entry in the chosen sort order. Summary mode returns every primary/secondary pair, or a single overall summary when grouping is absent. Primary subtotal columns are omitted from the flat summary to avoid accidental double-counting. Separate screen/export requests can differ if employees edit data between requests.
+
+Every workbook has a main sheet (`گزارش تفصیلی` or `خلاصه`) and `مشخصات گزارش` with date range, generation timestamp, human-readable filters, grouping, source count, server-calculated total and current-department semantics. Details include separate employee name/code/username, department, project code/name, contextual file, description and hours. Internal UUIDs, LDAP IDs, passwords and session data are never exported.
+
+Sheets have Persian headers, RTL layout, a frozen header and readable column widths. Jalali dates are explicit YYYY/MM/DD **text** using Persian digits; metadata also contains the ISO Gregorian range. Man-hours/counts are numeric cells, with hours displayed to two decimal places. PostgreSQL computes exact totals; conversion to Excel numbers happens once, with bounded precision and no JavaScript fractional summation. Totals are fixed server values, not recalculating formulas.
+
+All user text is explicitly stored as string cells. Formula-like text beginning with `=`, `+`, `-` or `@` (also after whitespace/direction marks) receives a leading apostrophe for defense in depth; no formulas or hyperlinks are generated from user data. Unsupported XML controls are removed. Overlong Excel cell text is rejected rather than silently truncated.
+
+Both modes have a hard limit of **20,000 matching source entries**; larger requests return a Persian 422 error asking for narrower filters, never a partial workbook. XLSX creation is in memory on Node.js using `write-excel-file` 4.1.1 (runtime); `read-excel-file` 9.3.10 is test-only. No writer is imported into client components. Responses use the real XLSX MIME type, no-store caching and safe ASCII date-based attachment filenames. The client shows progress/errors, blocks duplicate clicks and retains report state. No server temporary files or export queues are used.
+
+No Phase 4 migration is required. Existing reviewed migrations remain the deployment prerequisites. CSV/PDF exports are not included. See [Phase 4 record](docs/phase-4.md) for test coverage and performance measurements.
+
 ## Administration
 
 Persian/RTL IT screens:
@@ -171,4 +187,4 @@ pnpm test:system
 
 The database test role needs schema creation privileges. Passwords are never needed for fixture sessions. These tests verify session/authorization behavior, not a successful real LDAP bind. Live company LDAP login/logout and visual browser QA remain deployment checks; no connected browser or LDAP test credentials were available in this session.
 
-See [Phase 3 record](docs/phase-3.md), [Phase 2 record](docs/phase-2.md), [Phase 1 record](docs/phase-1.md) and the historical [Phase 0 record](docs/phase-0.md).
+See [Phase 4 record](docs/phase-4.md), [Phase 3 record](docs/phase-3.md), [Phase 2 record](docs/phase-2.md), [Phase 1 record](docs/phase-1.md) and the historical [Phase 0 record](docs/phase-0.md).

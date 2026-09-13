@@ -134,6 +134,7 @@ export const workEntries = pgTable(
   },
   (table) => [
     index("work_entries_employee_date_idx").on(table.employeeId, table.workDate),
+    index("work_entries_date_idx").on(table.workDate),
     index("work_entries_project_date_idx").on(table.projectId, table.workDate),
     index("work_entries_project_file_idx").on(table.projectFileId),
     foreignKey({

@@ -1,6 +1,6 @@
 # Employee Work Reporting System
 
-Phase 2 adds personal employee work reporting to the LDAP-backed identity and IT master-data foundation. Multiple activities per date, decimal hours, weekly history and atomic daily edits are supported. HR/company-wide reporting, exports, approvals and analytics are not implemented.
+Phase 3 adds weekly company reporting for business and IT administrators: combined filters, paginated details, exact totals and one/two-level grouping. Personal multi-row reporting, LDAP-backed identity and IT master data remain available. Exports, approvals, period locking, payroll and analytics dashboards are not implemented.
 
 ## Setup and migration
 
@@ -34,8 +34,8 @@ LDAP authenticates and supplies username, display name, directory identity and e
 | Role             | Current access                                                                                     |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
 | `EMPLOYEE`       | Dashboard and own work reports                                                                     |
-| `BUSINESS_ADMIN` | Dashboard and own work reports; no IT permissions or company-wide reporting                        |
-| `IT_ADMIN`       | Dashboard and own work reports; manage users, roles, departments, projects and project-file values |
+| `BUSINESS_ADMIN` | Dashboard, own work reports and company reporting; no IT master-data permissions                   |
+| `IT_ADMIN`       | Dashboard, own/company reports; manage users, roles, departments, projects and project-file values |
 
 `src/lib/roles.ts` is the canonical role definition used by PostgreSQL/Drizzle, Zod and UI. `requireUser()` protects authenticated pages; `requireRole(...roles)` protects role-specific pages; `requireApiRole(request, ...roles)` protects APIs. Anonymous APIs return 401; disallowed roles return 403. Every IT handler checks authorization, independent of navigation/layout visibility.
 
@@ -57,7 +57,7 @@ The command does not create users, reactivate accounts, or promote pending boots
 
 ## Employee work reporting
 
-All three roles can manage their own entries. There is no privileged cross-employee view or ownership override.
+All three roles can manage their own entries. Personal APIs have no privileged cross-employee view or ownership override; company reporting uses separate read-only routes.
 
 - `/reports`: personal Saturday–Friday week, daily/weekly totals and entry counts; previous/current/next available week navigation.
 - `/reports/new`: opens today's editor (today is determined in Asia/Tehran).
@@ -80,6 +80,30 @@ The service locks the employee row, rechecks activation, checks the loaded day's
 Limits live in `src/lib/work-reporting.ts`: at most 50 rows/day, 2,000 description characters/row, 512 KiB request body, 0.01–24 hours/row, maximum 24 hours/day. Totals over 12 hours warn without blocking unless the 24-hour sanity bound is exceeded. Hours support two decimal places, Persian/Arabic digits and the Persian decimal separator. All arithmetic uses integer hundredths; storage is PostgreSQL numeric(5,2).
 
 Dates must be real Gregorian dates from 2000-01-01 through 2099-12-31; writes cannot be after today in Tehran. There is no historical edit-period locking. Readable weeks include all seven days; future days are not offered for entry.
+
+## Company reporting
+
+`/admin/reports` is available only to BUSINESS_ADMIN and IT_ADMIN. EMPLOYEE is redirected to the dashboard; report APIs return 403 (401 for anonymous requests). Business admins still cannot access IT master-data APIs. Navigation keeps personal reports separate from company reports.
+
+The current Saturday–Friday week opens by default. Previous/current/next week links populate the same inclusive `from`/`to` dates used by custom ranges. Dates use Gregorian storage/URLs and Jalali presentation; ranges are limited to 366 days within 2000–2099. Future ranges are permitted for review, usually returning no results.
+
+GET `/api/admin/reports` and the page share a strict reusable query model in `src/lib/business-report-query.ts`:
+
+- `from`, `to`: both supplied or both omitted for the current week.
+- `employeeId`, `departmentId`, `projectId`, `projectFileId`: optional UUIDs, combined using AND.
+- `groupBy`, `groupBySecondary`: employee, department, project, projectFile or date; the second requires a different primary dimension.
+- `sort`: date (default), employee, department, project, projectFile or manHours; `direction`: desc (default) or asc.
+- `page`, `groupPage`: independent positive page numbers (maximum 100000); `pageSize`: 25, 50 (default) or 100.
+
+Unknown/repeated query parameters are rejected. Applied filters, grouping, sorting and pagination are bookmarkable URL state. Totals and counts represent every matching row, not the current page. Grouped pairs have separate pagination; each row includes its complete primary-group total, even when subgroups span pages. Do not sum the repeated primary-total column.
+
+`src/lib/business-reports.ts` is the reusable query layer for later export. Parameterized SQL uses allowlisted columns, many-to-one joins, PostgreSQL SUM/COUNT/GROUP BY and window totals in one read-only repeatable-read transaction. Numeric sums remain strings through display; no JavaScript fractional summation is used. IDs distinguish equal employee names and equal project-file codes; file labels include project context.
+
+**Department attribution means the employee's current department**, including for old entries. No department snapshot is stored. Unassigned users form a distinct "بدون واحد" group. Inactive employees/projects/files remain reportable and filterable; reporting does not impose active-only predicates.
+
+GET `/api/admin/reports/options?kind=employee|department|project|projectFile` provides up to 50 searchable options with a `more` flag. Optional `search`, `selected`, `projectId` and `departmentId` support dependent choices and current selection retention. Search is limited to 100 characters. Selecting a project narrows file options; without it, files across projects are searchable with contextual labels. Inactive options are labelled. These endpoints do not expose LDAP IDs, credentials or session metadata.
+
+Migration `0006_business_reporting_date_index.sql` adds only `work_entries_date_idx` for company-wide date ranges. Existing employee/date, project/date and file indexes are retained; no summary tables or snapshots were introduced. Review and apply with `pnpm db:migrate`. See [Phase 3 record](docs/phase-3.md) for validation and limitations.
 
 ## Administration
 
@@ -147,4 +171,4 @@ pnpm test:system
 
 The database test role needs schema creation privileges. Passwords are never needed for fixture sessions. These tests verify session/authorization behavior, not a successful real LDAP bind. Live company LDAP login/logout and visual browser QA remain deployment checks; no connected browser or LDAP test credentials were available in this session.
 
-See [Phase 2 record](docs/phase-2.md), [Phase 1 record](docs/phase-1.md) and the historical [Phase 0 record](docs/phase-0.md).
+See [Phase 3 record](docs/phase-3.md), [Phase 2 record](docs/phase-2.md), [Phase 1 record](docs/phase-1.md) and the historical [Phase 0 record](docs/phase-0.md).

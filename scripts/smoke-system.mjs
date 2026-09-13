@@ -162,6 +162,33 @@ try {
   let savedDay = await data(await request(reportPath, "EMPLOYEE"));
   assert.equal(savedDay.totalHours, "6.50");
   assert.equal(savedDay.entries.length, 3);
+  const companyQuery = `from=2026-01-03&to=2026-01-09&groupBy=project&groupBySecondary=employee`;
+  assert.equal((await request("/admin/reports")).headers.get("location"), "/login");
+  assert.equal((await request("/admin/reports", "EMPLOYEE")).headers.get("location"), "/dashboard");
+  for (const path of ["/api/admin/reports", "/api/admin/reports/options?kind=employee"]) {
+    assert.equal((await request(path)).status, 401);
+    assert.equal((await request(path, "EMPLOYEE")).status, 403);
+    for (const role of ["BUSINESS_ADMIN", "IT_ADMIN"])
+      assert.equal((await request(path, role)).status, 200);
+  }
+  for (const role of ["BUSINESS_ADMIN", "IT_ADMIN"]) {
+    const company = await data(await request(`/api/admin/reports?${companyQuery}`, role));
+    assert.equal(company.totalHours, "6.50");
+    assert.equal(company.entryCount, 3);
+    assert.equal(company.groups[0].primaryHours, "6.50");
+    const page = await request(`/admin/reports?${companyQuery}`, role);
+    assert.equal(page.status, 200);
+    assert.ok((await page.text()).includes("گزارش‌های سازمان"));
+    const dashboard = await request("/dashboard", role);
+    assert.ok((await dashboard.text()).includes('href="/admin/reports"'));
+  }
+  assert.equal((await request("/api/admin/reports?sort=unsafe", "BUSINESS_ADMIN")).status, 400);
+  assert.equal((await request("/api/admin/reports", "BUSINESS_ADMIN", "POST", {})).status, 405);
+  assert.equal((await request("/api/admin/users", "BUSINESS_ADMIN")).status, 403);
+  assert.equal(
+    (await (await request("/dashboard", "EMPLOYEE")).text()).includes('href="/admin/reports"'),
+    false,
+  );
   const weekData = await data(await request(`/api/work-entries?week=${reportDate}`, "EMPLOYEE"));
   assert.equal(weekData.totalHundredths, 650);
   const otherDay = await data(await request(reportPath, "BUSINESS_ADMIN"));

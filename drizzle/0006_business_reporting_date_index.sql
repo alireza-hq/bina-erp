@@ -1,0 +1,1 @@
+CREATE INDEX "work_entries_date_idx" ON "work_entries" USING btree ("work_date");

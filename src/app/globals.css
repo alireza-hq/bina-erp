@@ -791,3 +791,27 @@ textarea:focus {
     flex-wrap: wrap;
   }
 }
+.business-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.business-filter-grid label {
+  display: block;
+  margin-bottom: 6px;
+}
+.business-filter-grid input {
+  width: 100%;
+  margin-bottom: 6px;
+}
+.business-filters fieldset {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.report-description {
+  white-space: pre-wrap;
+  min-width: 220px;
+  overflow-wrap: anywhere;
+}

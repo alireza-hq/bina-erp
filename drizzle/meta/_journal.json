@@ -43,6 +43,13 @@
       "when": 1789277866424,
       "tag": "0005_employee_work_entries",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789280113009,
+      "tag": "0006_business_reporting_date_index",
+      "breakpoints": true
     }
   ]
 }

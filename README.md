@@ -1,6 +1,6 @@
 # Employee Work Reporting System
 
-Phase 4 adds detailed and grouped XLSX exports to weekly company reporting. Combined filters, paginated details, exact totals and one/two-level grouping remain available alongside personal work reporting, LDAP identity and IT master data. Approvals, period locking, payroll and analytics dashboards are not implemented.
+Phase 5 adds manual weekly locks and a transactional audit trail. Personal work reporting, company filtering/grouping and XLSX exports remain available. Approvals, payroll, notifications and analytics dashboards are not implemented.
 
 ## Setup and migration
 
@@ -79,7 +79,7 @@ The service locks the employee row, rechecks activation, checks the loaded day's
 
 Limits live in `src/lib/work-reporting.ts`: at most 50 rows/day, 2,000 description characters/row, 512 KiB request body, 0.01–24 hours/row, maximum 24 hours/day. Totals over 12 hours warn without blocking unless the 24-hour sanity bound is exceeded. Hours support two decimal places, Persian/Arabic digits and the Persian decimal separator. All arithmetic uses integer hundredths; storage is PostgreSQL numeric(5,2).
 
-Dates must be real Gregorian dates from 2000-01-01 through 2099-12-31; writes cannot be after today in Tehran. There is no historical edit-period locking. Readable weeks include all seven days; future days are not offered for entry.
+Dates must be real Gregorian dates from 2000-01-01 through 2099-12-31; writes cannot be after today in Tehran or in a locked reporting week. Readable weeks include all seven days; future days are not offered for entry.
 
 ## Company reporting
 
@@ -121,6 +121,24 @@ Both modes have a hard limit of **20,000 matching source entries**; larger reque
 
 No Phase 4 migration is required. Existing reviewed migrations remain the deployment prerequisites. CSV/PDF exports are not included. See [Phase 4 record](docs/phase-4.md) for test coverage and performance measurements.
 
+## Reporting-period locks and audit
+
+Reporting weeks remain Saturday–Friday. A week without a `reporting_periods` row is **OPEN**; reads and employee saves do not require pre-created weeks. BUSINESS_ADMIN and IT_ADMIN can explicitly lock/unlock an exact week from `/admin/reports`, with a confirmation showing the affected range. No automatic locking runs. Current/future weeks remain open unless an administrator deliberately locks them. Partial/multi-week custom ranges show guidance instead of an ambiguous lock action.
+
+- GET `/api/admin/reporting-periods/[week]`: current/default status, lock actor and timestamp.
+- POST `/api/admin/reporting-periods/[week]/lock` and `/unlock`: explicit authorized, same-origin actions. `[week]` must be a valid Gregorian Saturday; Friday is derived. Repeated actions are idempotent and do not duplicate audit events.
+- All employee-facing day mutations, including those by administrators managing their own entries, reject locked weeks with HTTP 423. There is no role bypass. Read/report/export operations remain available.
+
+The work service takes a shared transaction advisory lock for the deterministic week **before** checking state and changing rows. Period changes take the matching exclusive lock, including for absent periods. A save that gets the lock first completes before the administrator's lock; after the lock commits, subsequent saves are rejected atomically. Existing ownership/version checks remain. The day editor disables edit/add/remove/save controls when locked and handles a newly locked stale form safely. Refresh after an administrator unlocks an already open read-only page.
+
+`audit_logs` records actor, action, entity ID/type, selected before/after JSON and timestamp in the **same transaction** as each mutation. Work entries have individual create/update/delete events; unchanged rows produce no event. Role, department, user activation, employee-code, department/project/file creation/edit/activation and period transitions are covered. Failed audit writes roll back the business mutation. Descriptions are retained to reconstruct work changes; LDAP IDs/passwords, cookies and session tokens are excluded. Read operations are not logged.
+
+IT_ADMIN alone can access `/system/audit` and GET `/api/admin/audit`. The viewer has date, actor-name/username, action and entity-type filters, 25/50/100-row pagination and expandable before/after details. The default date range is the latest 30 days, inclusive in Tehran time. Input dates are explicitly labelled Gregorian; event timestamps are shown in Persian/Jalali. No audit update/delete/clear endpoint exists. `pnpm admin:promote` also records a role-change event transactionally, with a null actor and explicit operator-command source; it requires the Phase 5 schema.
+
+Migration `0007_reporting_periods_and_audit.sql` adds only the two tables, enums, constraints and indexes. Unique Saturday starts plus exact seven-day ranges prevent overlaps. Audit actors and lock owners reference users with RESTRICT; event entity IDs intentionally have no FK so deleted work entries remain identifiable. No work entries, identities or sessions are removed and no old changes are backfilled. **Apply reviewed migrations with `pnpm db:migrate` before running this version.** Tests migrate isolated schemas, not application tables.
+
+Locks freeze work-entry mutations through the application, **not employee department attribution or reference names**. Current-department semantics remain unchanged, so reassignment can change department-based grouping/filter results even in locked weeks. Audit is append-only through application APIs, not a tamper-proof database ledger. Database operators retain control; retention and historical snapshots remain future work. See [Phase 5 record](docs/phase-5.md).
+
 ## Administration
 
 Persian/RTL IT screens:
@@ -155,7 +173,7 @@ The project ID is taken from the route; a file cannot be moved or updated throug
 
 ## Database safety
 
-Active tables: `users`, `sessions`, `departments`, `projects`, `project_files`, `work_entries`. Application `users.isActive` maps to the existing SQL column `active`; it was not renamed. New nullable user fields are `department_id`, `employee_code` and `last_login_at`.
+Active tables: `users`, `sessions`, `departments`, `projects`, `project_files`, `work_entries`, `reporting_periods`, `audit_logs`. Application `users.isActive` maps to the existing SQL column `active`; it was not renamed. Nullable user fields include `department_id`, `employee_code` and `last_login_at`.
 
 Migration `0003` archives the old domain in `legacy_letter_list` without dropping data. It must precede `0004`, which creates a new, unrelated `public.projects` table. The archive remains outside the active Drizzle domain. Migration `0004_identity_and_master_data.sql` backfills roles as documented above, replaces the enum, adds user metadata and creates the three master-data tables and indexes. Users and sessions are not deleted.
 
@@ -187,4 +205,4 @@ pnpm test:system
 
 The database test role needs schema creation privileges. Passwords are never needed for fixture sessions. These tests verify session/authorization behavior, not a successful real LDAP bind. Live company LDAP login/logout and visual browser QA remain deployment checks; no connected browser or LDAP test credentials were available in this session.
 
-See [Phase 4 record](docs/phase-4.md), [Phase 3 record](docs/phase-3.md), [Phase 2 record](docs/phase-2.md), [Phase 1 record](docs/phase-1.md) and the historical [Phase 0 record](docs/phase-0.md).
+See [Phase 5 record](docs/phase-5.md), [Phase 4 record](docs/phase-4.md), [Phase 3 record](docs/phase-3.md), [Phase 2 record](docs/phase-2.md), [Phase 1 record](docs/phase-1.md) and the historical [Phase 0 record](docs/phase-0.md).

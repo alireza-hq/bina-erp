@@ -8,6 +8,7 @@ import type { OwnDay } from "@/lib/work-entries";
 import { dailyEntriesSchema } from "@/lib/work-validation";
 import { WORK_LIMITS, displayHours, hoursToHundredths, isCalendarDate } from "@/lib/work-reporting";
 import { toPersianDigits } from "@/lib/persian";
+import { LOCKED_MESSAGE } from "@/lib/period-model";
 
 type Choice = { id: string; name: string; code: string };
 type Draft = {
@@ -142,9 +143,15 @@ export function WorkDayEditor({
   const router = useRouter();
   const [day, setDay] = useState(initialDay);
   const [rows, setRows] = useState<Draft[]>(() =>
-    initialDay.entries.length ? draftRows(initialDay) : [emptyRow("new-0")],
+    initialDay.entries.length
+      ? draftRows(initialDay)
+      : initialDay.period.status === "LOCKED"
+        ? []
+        : [emptyRow("new-0")],
   );
   const [busy, setBusy] = useState(false);
+  const [locked, setLocked] = useState(initialDay.period.status === "LOCKED");
+  const readOnly = busy || locked;
   const saving = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");
@@ -176,7 +183,7 @@ export function WorkDayEditor({
   }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving.current) return;
+    if (saving.current || locked) return;
     setError("");
     setSuccess("");
     setConflict(false);
@@ -207,6 +214,7 @@ export function WorkDayEditor({
       });
       const value = await response.json();
       if (!response.ok) {
+        if (response.status === 423) setLocked(true);
         setConflict(response.status === 409);
         setExpired(response.status === 401);
         throw new Error(value.message || "ذخیره انجام نشد");
@@ -243,6 +251,7 @@ export function WorkDayEditor({
         </Link>
       </header>
       <section className="admin-surface">
+        <p role="status">{locked ? LOCKED_MESSAGE : "این هفته باز است"}</p>
         <fieldset disabled={busy} className="report-date-field">
           <span>تاریخ</span>
           <JalaliDatePicker value={day.date} onChange={changeDate} ariaLabel="تاریخ گزارش کار" />
@@ -279,7 +288,7 @@ export function WorkDayEditor({
                       <td>
                         <CustomSelect
                           value={row.projectId}
-                          disabled={busy}
+                          disabled={readOnly}
                           ariaLabel={`پروژه ردیف ${index + 1}`}
                           options={[
                             { value: "", label: "انتخاب پروژه" },
@@ -299,14 +308,14 @@ export function WorkDayEditor({
                           row={row}
                           original={original}
                           index={index}
-                          disabled={busy}
+                          disabled={readOnly}
                           onChange={(projectFileId) => updateRow(row.key, { projectFileId })}
                         />
                       </td>
                       <td>
                         <textarea
                           aria-label={`شرح فعالیت ردیف ${index + 1}`}
-                          disabled={busy}
+                          disabled={readOnly}
                           maxLength={WORK_LIMITS.descriptionLength}
                           value={row.description}
                           onChange={(event) =>
@@ -322,7 +331,7 @@ export function WorkDayEditor({
                           inputMode="decimal"
                           dir="ltr"
                           maxLength={16}
-                          disabled={busy}
+                          disabled={readOnly}
                           placeholder="1.5"
                           value={row.manHours}
                           onChange={(event) => updateRow(row.key, { manHours: event.target.value })}
@@ -333,7 +342,7 @@ export function WorkDayEditor({
                           type="button"
                           aria-label={`حذف ردیف ${index + 1}`}
                           className="secondary-button"
-                          disabled={busy}
+                          disabled={readOnly}
                           onClick={() => {
                             setRows((rows) => rows.filter((r) => r.key !== row.key));
                             setDirty(true);
@@ -351,14 +360,16 @@ export function WorkDayEditor({
           </div>
           {!rows.length && (
             <p className="admin-help">
-              ردیفی وجود ندارد. ذخیره، تمام ردیف‌های قبلی این روز شما را حذف می‌کند.
+              {locked
+                ? "فعالیتی برای این روز ثبت نشده است."
+                : "ردیفی وجود ندارد. ذخیره، تمام ردیف‌های قبلی این روز شما را حذف می‌کند."}
             </p>
           )}
           <div className="report-editor-footer">
             <button
               type="button"
               className="secondary-button"
-              disabled={busy || rows.length >= WORK_LIMITS.maxRows}
+              disabled={readOnly || rows.length >= WORK_LIMITS.maxRows}
               onClick={() => {
                 setRows((rows) => [...rows, emptyRow(crypto.randomUUID())]);
                 setDirty(true);
@@ -371,7 +382,7 @@ export function WorkDayEditor({
             <button
               className="primary-button"
               type="submit"
-              disabled={busy || expired || day.date > today}
+              disabled={readOnly || expired || day.date > today}
             >
               {busy ? "در حال ذخیره…" : "ذخیره"}
             </button>

@@ -11,9 +11,11 @@ import {
   numeric,
   check,
   foreignKey,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { APP_ROLES } from "@/lib/roles";
+import { AUDIT_ACTIONS } from "@/lib/audit-model";
 
 export const userRole = pgEnum("user_role", APP_ROLES);
 
@@ -75,6 +77,51 @@ export const sessions = pgTable(
 );
 
 export type AppUser = typeof users.$inferSelect;
+
+export const periodStatus = pgEnum("reporting_period_status", ["OPEN", "LOCKED"]);
+export const reportingPeriods = pgTable(
+  "reporting_periods",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    weekStart: date("week_start", { mode: "string" }).notNull().unique(),
+    weekEnd: date("week_end", { mode: "string" }).notNull(),
+    status: periodStatus("status").notNull().default("OPEN"),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lockedBy: uuid("locked_by").references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "reporting_period_week_check",
+      sql`extract(dow from ${t.weekStart}) = 6 AND ${t.weekEnd} = ${t.weekStart} + 6 AND ${t.weekStart} >= DATE '2000-01-01' AND ${t.weekStart} <= DATE '2099-12-31'`,
+    ),
+    check(
+      "reporting_period_lock_check",
+      sql`(${t.status} = 'OPEN' AND ${t.lockedAt} IS NULL AND ${t.lockedBy} IS NULL) OR (${t.status} = 'LOCKED' AND ${t.lockedAt} IS NOT NULL AND ${t.lockedBy} IS NOT NULL)`,
+    ),
+  ],
+);
+export const auditAction = pgEnum("audit_action", AUDIT_ACTIONS);
+export const auditLogs = pgTable(
+  "audit_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "restrict" }),
+    action: auditAction("action").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    oldData: jsonb("old_data").$type<Record<string, unknown> | null>(),
+    newData: jsonb("new_data").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("audit_created_idx").on(t.createdAt, t.id),
+    index("audit_actor_created_idx").on(t.actorUserId, t.createdAt),
+    index("audit_action_created_idx").on(t.action, t.createdAt),
+    index("audit_entity_created_idx").on(t.entityType, t.createdAt),
+  ],
+);
 
 export const projects = pgTable(
   "projects",

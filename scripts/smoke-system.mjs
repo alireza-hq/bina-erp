@@ -223,6 +223,78 @@ try {
   );
   const weekData = await data(await request(`/api/work-entries?week=${reportDate}`, "EMPLOYEE"));
   assert.equal(weekData.totalHundredths, 650);
+  const periodPath = "/api/admin/reporting-periods/2026-01-03";
+  assert.equal((await request(`${periodPath}/lock`, undefined, "POST")).status, 401);
+  assert.equal((await request(`${periodPath}/lock`, "EMPLOYEE", "POST")).status, 403);
+  const savedValues = () =>
+    savedDay.entries.map(({ id, projectId, projectFileId, description, manHours }) => ({
+      id,
+      projectId,
+      projectFileId,
+      description,
+      manHours,
+    }));
+  // Actual simultaneous requests: a save may finish before the lock, never after it bypassing the check.
+  const race = await Promise.all([
+    request(`${periodPath}/lock`, "BUSINESS_ADMIN", "POST"),
+    request(reportPath, "EMPLOYEE", "PUT", { version: savedDay.version, entries: savedValues() }),
+  ]);
+  assert.equal(race[0].status, 200);
+  assert.ok([200, 423].includes(race[1].status));
+  await data(await request(`${periodPath}/lock`, "IT_ADMIN", "POST"));
+  const [lockCount] =
+    await sql`select count(*)::int as count from audit_logs where action='PERIOD_LOCKED'`;
+  assert.equal(lockCount.count, 1);
+  for (const entries of [
+    [],
+    [...savedValues(), workRows[0]],
+    savedValues().map((row) => ({ ...row, manHours: "1" })),
+  ])
+    assert.equal(
+      (await request(reportPath, "EMPLOYEE", "PUT", { version: savedDay.version, entries })).status,
+      423,
+    );
+  const lockedPage = await request(`/reports/${reportDate}`, "EMPLOYEE");
+  assert.equal(lockedPage.status, 200);
+  assert.ok((await lockedPage.text()).includes("توسط مدیریت بسته شده"));
+  assert.equal(
+    (await data(await request(`/api/admin/reports?${companyQuery}`, "BUSINESS_ADMIN"))).totalHours,
+    "6.50",
+  );
+  const lockedExport = await request(exportPath, "BUSINESS_ADMIN");
+  assert.equal(lockedExport.status, 200);
+  assert.equal(
+    (await readWorkbook(Buffer.from(await lockedExport.arrayBuffer())))[1].data.find(
+      (row) => row[0] === "جمع نفر-ساعت منبع",
+    )[1],
+    6.5,
+  );
+  const management = await request(`/admin/reports?${companyQuery}`, "BUSINESS_ADMIN");
+  assert.ok((await management.text()).includes("باز کردن هفته"));
+  const custom = await request("/admin/reports?from=2026-01-04&to=2026-01-05", "BUSINESS_ADMIN");
+  assert.ok(!(await custom.text()).includes("قفل کردن هفته"));
+  for (const role of ["EMPLOYEE", "BUSINESS_ADMIN"]) {
+    assert.equal((await request("/api/admin/audit", role)).status, 403);
+    assert.equal((await request("/system/audit", role)).headers.get("location"), "/dashboard");
+  }
+  assert.equal((await request("/api/admin/audit")).status, 401);
+  assert.equal((await request("/system/audit")).headers.get("location"), "/login");
+  assert.equal((await request("/system/audit", "IT_ADMIN")).status, 200);
+  assert.equal((await request("/api/admin/audit", "IT_ADMIN", "DELETE")).status, 405);
+  const audit = await data(await request("/api/admin/audit?action=PERIOD_LOCKED", "IT_ADMIN"));
+  assert.equal(audit.count, 1);
+  await data(await request(`${periodPath}/unlock`, "IT_ADMIN", "POST"));
+  await data(await request(`${periodPath}/unlock`, "BUSINESS_ADMIN", "POST"));
+  const [unlockCount] =
+    await sql`select count(*)::int as count from audit_logs where action='PERIOD_UNLOCKED'`;
+  assert.equal(unlockCount.count, 1);
+  savedDay = await data(
+    await request(reportPath, "EMPLOYEE", "PUT", {
+      version: savedDay.version,
+      entries: savedValues().map((row) => ({ ...row, description: "اصلاح پس از باز شدن" })),
+    }),
+  );
+  assert.equal(savedDay.totalHours, "6.50");
   const otherDay = await data(await request(reportPath, "BUSINESS_ADMIN"));
   assert.equal(otherDay.entries.length, 0);
   const first = savedDay.entries[0];

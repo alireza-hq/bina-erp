@@ -68,6 +68,7 @@ export function AppHeader({ user }: { user: { displayName: string; role: AppRole
               ["/system/users", "کاربران"],
               ["/system/departments", "واحدها"],
               ["/system/projects", "پروژه‌ها"],
+              ["/system/audit", "رویدادهای سیستم"],
             ].map(([href, label]) => (
               <Link key={href} href={href} className={pathname.startsWith(href) ? "active" : ""}>
                 {label}

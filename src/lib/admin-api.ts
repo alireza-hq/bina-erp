@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { departments, projects, projectFiles, sessions, users } from "@/db/schema";
 import { requireApiRole } from "@/lib/auth";
 import { jsonError, parseJson } from "@/lib/api";
+import { auditMasterChange } from "@/lib/audit";
 import {
   departmentSchema,
   departmentUpdateSchema,
@@ -44,11 +45,19 @@ export async function masterCollection(request: Request, kind: Master) {
     if (kind === "departments") {
       const parsed = await parseJson(request, departmentSchema);
       if ("error" in parsed) return parsed.error;
-      return ok((await db.insert(departments).values(parsed.data).returning())[0], 201);
+      return await db.transaction(async (tx) => {
+        const [row] = await tx.insert(departments).values(parsed.data).returning();
+        await auditMasterChange(tx, actor.user.id, "DEPARTMENT", row.id, null, row);
+        return ok(row, 201);
+      });
     }
     const parsed = await parseJson(request, projectSchema);
     if ("error" in parsed) return parsed.error;
-    return ok((await db.insert(projects).values(parsed.data).returning())[0], 201);
+    return await db.transaction(async (tx) => {
+      const [row] = await tx.insert(projects).values(parsed.data).returning();
+      await auditMasterChange(tx, actor.user.id, "PROJECT", row.id, null, row);
+      return ok(row, 201);
+    });
   } catch (error) {
     return failure(error);
   }
@@ -62,21 +71,35 @@ export async function masterItem(request: Request, kind: Master, id: string) {
     if (kind === "departments") {
       const parsed = await parseJson(request, departmentUpdateSchema);
       if ("error" in parsed) return parsed.error;
-      const [row] = await db
-        .update(departments)
-        .set({ ...parsed.data, updatedAt: new Date() })
-        .where(eq(departments.id, id))
-        .returning();
-      return row ? ok(row) : jsonError("واحد پیدا نشد", 404);
+      return await db.transaction(async (tx) => {
+        const [before] = await tx
+          .select()
+          .from(departments)
+          .where(eq(departments.id, id))
+          .for("update");
+        if (!before) return jsonError("واحد پیدا نشد", 404);
+        const [row] = await tx
+          .update(departments)
+          .set({ ...parsed.data, updatedAt: new Date() })
+          .where(eq(departments.id, id))
+          .returning();
+        await auditMasterChange(tx, actor.user.id, "DEPARTMENT", id, before, row);
+        return ok(row);
+      });
     }
     const parsed = await parseJson(request, projectUpdateSchema);
     if ("error" in parsed) return parsed.error;
-    const [row] = await db
-      .update(projects)
-      .set({ ...parsed.data, updatedAt: new Date() })
-      .where(eq(projects.id, id))
-      .returning();
-    return row ? ok(row) : jsonError("پروژه پیدا نشد", 404);
+    return await db.transaction(async (tx) => {
+      const [before] = await tx.select().from(projects).where(eq(projects.id, id)).for("update");
+      if (!before) return jsonError("پروژه پیدا نشد", 404);
+      const [row] = await tx
+        .update(projects)
+        .set({ ...parsed.data, updatedAt: new Date() })
+        .where(eq(projects.id, id))
+        .returning();
+      await auditMasterChange(tx, actor.user.id, "PROJECT", id, before, row);
+      return ok(row);
+    });
   } catch (error) {
     return failure(error);
   }
@@ -104,12 +127,14 @@ export async function projectFileCollection(request: Request, projectId: string)
       if (!project.isActive) throw new AdminError("ابتدا پروژه را فعال کنید", 409);
       const parsed = await parseJson(request, projectFileSchema);
       if ("error" in parsed) return parsed.error;
-      return (
+      const row = (
         await tx
           .insert(projectFiles)
           .values({ ...parsed.data, projectId })
           .returning()
       )[0];
+      await auditMasterChange(tx, actor.user.id, "PROJECT_FILE", row.id, null, row);
+      return row;
     });
     return data instanceof Response ? data : ok(data, request.method === "GET" ? 200 : 201);
   } catch (error) {
@@ -143,6 +168,7 @@ export async function projectFileItem(request: Request, projectId: string, id: s
         .set({ ...parsed.data, updatedAt: new Date() })
         .where(and(eq(projectFiles.id, id), eq(projectFiles.projectId, projectId)))
         .returning();
+      await auditMasterChange(tx, actor.user.id, "PROJECT_FILE", id, file, row);
       return ok(row);
     });
   } catch (error) {
@@ -184,7 +210,8 @@ export async function updateUser(request: Request, id: string) {
       const [currentActor] = await tx.select().from(users).where(eq(users.id, actor.user.id));
       if (!currentActor?.isActive || currentActor.role !== "IT_ADMIN")
         throw new AdminError("دسترسی کافی ندارید", 403);
-      const [target] = await tx.select().from(users).where(eq(users.id, id)).for("update");
+      // Serialize edits without blocking the key-share FK check of audit inserts by this actor.
+      const [target] = await tx.select().from(users).where(eq(users.id, id)).for("no key update");
       if (!target) throw new AdminError("کاربر پیدا نشد", 404);
       const data = parsed.data;
       if (
@@ -207,6 +234,7 @@ export async function updateUser(request: Request, id: string) {
         .where(eq(users.id, id))
         .returning(userAdminColumns);
       if (data.isActive === false) await tx.delete(sessions).where(eq(sessions.userId, id));
+      await auditMasterChange(tx, actor.user.id, "USER", id, target, row);
       return ok(row);
     });
   } catch (error) {

@@ -1,4 +1,5 @@
 import { ZodError } from "zod";
+import { PeriodError } from "@/lib/period-model";
 import { requireApiRole } from "@/lib/auth";
 import { APP_ROLES } from "@/lib/roles";
 import { jsonError } from "@/lib/api";
@@ -17,6 +18,7 @@ function ok(data: unknown) {
   return Response.json({ ok: true, data }, { headers: { "Cache-Control": "private, no-store" } });
 }
 function failure(error: unknown) {
+  if (error instanceof PeriodError) return jsonError(error.message, error.status);
   if (error instanceof WorkEntryError) return jsonError(error.message, error.status);
   if (error instanceof ZodError) {
     const issue = error.issues[0];

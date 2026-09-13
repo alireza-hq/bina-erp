@@ -44,6 +44,11 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
         )}
       </nav>
       <section className="admin-surface">
+        <p role="status">
+          {report.period.status === "LOCKED"
+            ? "این دوره قفل شده است؛ گزارش‌ها فقط قابل مشاهده هستند."
+            : "این هفته باز است"}
+        </p>
         <div className="report-summary">
           <strong>
             جمع هفته: {toPersianDigits(displayHours(report.totalHundredths))} نفر-ساعت

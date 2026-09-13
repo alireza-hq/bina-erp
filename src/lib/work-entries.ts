@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 import { db } from "@/db";
 import { users, workEntries, projects, projectFiles } from "@/db/schema";
+import { assertReportingPeriodEditable, getReportingPeriod } from "@/lib/reporting-periods";
+import { auditData, recordAudit } from "@/lib/audit";
 import { dailyEntriesSchema, reportDateSchema, writableDateSchema } from "@/lib/work-validation";
 import {
   WORK_LIMITS,
@@ -69,7 +71,10 @@ function snapshot(date: string, rows: Awaited<ReturnType<typeof readDay>>) {
 export type OwnDay = Awaited<ReturnType<typeof getOwnWorkEntriesForDate>>;
 export async function getOwnWorkEntriesForDate(employeeId: string, date: string) {
   reportDateSchema.parse(date);
-  return snapshot(date, await readDay(db, employeeId, date));
+  return {
+    ...snapshot(date, await readDay(db, employeeId, date)),
+    period: await getReportingPeriod(date),
+  };
 }
 export async function getOwnWorkWeek(employeeId: string, date: string) {
   reportDateSchema.parse(date);
@@ -96,6 +101,7 @@ export async function getOwnWorkWeek(employeeId: string, date: string) {
   }
   return {
     start,
+    period: await getReportingPeriod(start),
     days,
     totalHundredths: days.reduce((sum, day) => sum + day.totalHundredths, 0),
     count: rows.length,
@@ -125,11 +131,12 @@ export async function updateOwnDailyEntries(employeeId: string, date: string, in
   writableDateSchema.parse(date);
   const data = dailyEntriesSchema.parse(input);
   return db.transaction(async (tx) => {
+    const period = await assertReportingPeriodEditable(tx, date);
     const [employee] = await tx
       .select({ isActive: users.isActive })
       .from(users)
       .where(eq(users.id, employeeId))
-      .for("update");
+      .for("no key update");
     if (!employee?.isActive)
       throw new WorkEntryError("نشست معتبر نیست یا حساب غیرفعال شده است", 401);
     const current = await readDay(tx, employeeId, date);
@@ -206,6 +213,44 @@ export async function updateOwnDailyEntries(employeeId: string, date: string, in
             );
       } else await tx.insert(workEntries).values({ ...values, employeeId, workDate: date });
     }
-    return snapshot(date, await readDay(tx, employeeId, date));
+    const after = await readDay(tx, employeeId, date);
+    const final = new Map(after.map((row) => [row.id, row]));
+    const payload = (row: object) =>
+      auditData("WORK_ENTRY", { ...row, employeeId, workDate: date });
+    for (const old of current) {
+      const next = final.get(old.id);
+      if (!next)
+        await recordAudit(
+          tx,
+          employeeId,
+          "WORK_ENTRY_DELETED",
+          "WORK_ENTRY",
+          old.id,
+          payload(old),
+          null,
+        );
+      else if (JSON.stringify(payload(old)) !== JSON.stringify(payload(next)))
+        await recordAudit(
+          tx,
+          employeeId,
+          "WORK_ENTRY_UPDATED",
+          "WORK_ENTRY",
+          old.id,
+          payload(old),
+          payload(next),
+        );
+    }
+    for (const row of after)
+      if (!existing.has(row.id))
+        await recordAudit(
+          tx,
+          employeeId,
+          "WORK_ENTRY_CREATED",
+          "WORK_ENTRY",
+          row.id,
+          null,
+          payload(row),
+        );
+    return { ...snapshot(date, after), period };
   });
 }

@@ -3,6 +3,8 @@ import { ZodError } from "zod";
 import { requireRole } from "@/lib/auth";
 import { BusinessReportFilters } from "@/components/business-report-filters";
 import { ReportExportActions } from "@/components/report-export-actions";
+import { PeriodControl } from "@/components/period-control";
+import { getReportingPeriod } from "@/lib/reporting-periods";
 import {
   REPORT_ROLES,
   parseBusinessReportQuery,
@@ -77,6 +79,10 @@ export default async function Page({ searchParams }: PageProps<"/admin/reports">
     );
   }
   const result = await getBusinessReport(query);
+  const period =
+    query.from === weekStart(query.from) && query.to === shiftDate(query.from, 6)
+      ? await getReportingPeriod(query.from)
+      : null;
   const current = weekStart(todayInTehran());
   const weeks = [
     ["هفته قبل", shiftDate(weekStart(query.from), -7)],
@@ -112,6 +118,13 @@ export default async function Page({ searchParams }: PageProps<"/admin/reports">
       </p>
       <BusinessReportFilters key={JSON.stringify(query)} query={query} />
       <ReportExportActions query={query} />
+      {period ? (
+        <PeriodControl key={JSON.stringify(period)} initial={period} />
+      ) : (
+        <p className="admin-help">
+          مدیریت قفل فقط برای یک هفته کامل شنبه تا جمعه فعال است؛ یک هفته را انتخاب کنید.
+        </p>
+      )}
       <section className="admin-surface">
         <div className="report-summary">
           <strong>جمع کل فیلترشده: {hours(result.totalHours)} نفر-ساعت</strong>

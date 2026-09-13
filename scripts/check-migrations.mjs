@@ -44,7 +44,7 @@ try {
       await tx`select table_name from information_schema.tables where table_schema = ${scratch} order by table_name`;
     assert.deepEqual(
       tables.map((row) => row.table_name),
-      ["departments", "project_files", "projects", "sessions", "users"],
+      ["departments", "project_files", "projects", "sessions", "users", "work_entries"],
     );
     // The archive's FK to users remains valid after moving the tables.
     const [owner] = await tx.unsafe(

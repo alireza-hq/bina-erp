@@ -1,4 +1,52 @@
 @import "tailwindcss";
+.report-date-field {
+  border: 0;
+  margin: 0 0 24px;
+  padding: 0;
+  max-width: 280px;
+  display: grid;
+  gap: 8px;
+}
+.report-week-nav {
+  margin-bottom: 20px;
+}
+.report-summary,
+.report-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 0;
+}
+.work-editor-table {
+  min-width: 950px;
+}
+.work-editor-table td {
+  vertical-align: top;
+}
+.work-editor-table td:nth-child(1),
+.work-editor-table td:nth-child(2) {
+  width: 23%;
+}
+.work-editor-table td:nth-child(3) {
+  width: 34%;
+}
+.work-editor-table .hours-input {
+  min-width: 80px;
+  max-width: 110px;
+}
+.work-editor-table .custom-select-trigger span {
+  white-space: normal;
+  text-align: right;
+}
+.report-warning {
+  padding: 12px;
+  background: #fff8e7;
+  border: 1px solid #ead69d;
+  color: #755416;
+  border-radius: 8px;
+}
 :root {
   --navy: #172554;
   --navy-2: #1e3a5f;

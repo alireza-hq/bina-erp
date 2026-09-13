@@ -55,7 +55,7 @@ if (process.argv.includes("--authenticated")) {
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, /Phase 0 smoke test/);
-    assert.match(html, /زیرساخت سامانه آماده است/);
+    assert.match(html, /گزارش کار روزانه/);
     assert.equal(
       (await request("/login", { headers: { cookie } })).headers.get("location"),
       "/dashboard",

@@ -17,7 +17,7 @@
     "db:check-migrations": "node scripts/check-migrations.mjs",
     "test:smoke": "node scripts/smoke.mjs",
     "admin:promote": "node scripts/bootstrap-admin.mjs",
-    "test:integration": "node --test tests/system.integration.cjs",
+    "test:integration": "node --test tests/*.integration.cjs",
     "test:system": "node scripts/smoke-system.mjs"
   },
   "dependencies": {

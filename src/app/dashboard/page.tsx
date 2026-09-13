@@ -32,8 +32,16 @@ export default async function DashboardPage() {
           </div>
         </header>
         <section className="blank-state">
-          <h2>زیرساخت سامانه آماده است</h2>
-          <p>قابلیت‌های گزارش کار در مرحله بعد اضافه خواهند شد.</p>
+          <h2>گزارش کار روزانه</h2>
+          <p>فعالیت‌های روزانه خود را ثبت کنید و گزارش‌های هفته را ببینید.</p>
+          <div className="admin-actions dashboard-links">
+            <Link href="/reports" className="secondary-button">
+              گزارش کار من
+            </Link>
+            <Link href="/reports/new" className="primary-button">
+              ثبت فعالیت
+            </Link>
+          </div>
           {user.role === "IT_ADMIN" && (
             <div className="admin-actions dashboard-links">
               <Link href="/system/users" className="secondary-button">

@@ -36,6 +36,13 @@
       "when": 1789202840183,
       "tag": "0004_identity_and_master_data",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789277866424,
+      "tag": "0005_employee_work_entries",
+      "breakpoints": true
     }
   ]
 }

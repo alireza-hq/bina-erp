@@ -137,6 +137,60 @@ try {
     201,
   );
   assert.equal((await request(`/system/projects/${project.id}`, "IT_ADMIN")).status, 200);
+  // Employee work flow, including simultaneous duplicate saves through real HTTP requests.
+  const reportDate = "2026-01-05";
+  const reportPath = `/api/work-entries/${reportDate}`;
+  for (const path of ["/reports", `/reports/${reportDate}`, "/reports/new"]) {
+    assert.equal((await request(path)).headers.get("location"), "/login");
+  }
+  assert.equal((await request(reportPath)).status, 401);
+  assert.equal((await request("/reports?week=2026-01-05", "EMPLOYEE")).status, 200);
+  assert.equal((await request(`/reports/${reportDate}`, "EMPLOYEE")).status, 200);
+  const emptyDay = await data(await request(reportPath, "EMPLOYEE"));
+  const workRows = ["2", "1.5", "3"].map((manHours) => ({
+    projectId: project.id,
+    projectFileId: file.id,
+    description: "بررسی مدرک",
+    manHours,
+  }));
+  const duplicate = await Promise.all(
+    [1, 2].map(() =>
+      request(reportPath, "EMPLOYEE", "PUT", { version: emptyDay.version, entries: workRows }),
+    ),
+  );
+  assert.deepEqual(duplicate.map((response) => response.status).sort(), [200, 409]);
+  let savedDay = await data(await request(reportPath, "EMPLOYEE"));
+  assert.equal(savedDay.totalHours, "6.50");
+  assert.equal(savedDay.entries.length, 3);
+  const weekData = await data(await request(`/api/work-entries?week=${reportDate}`, "EMPLOYEE"));
+  assert.equal(weekData.totalHundredths, 650);
+  const otherDay = await data(await request(reportPath, "BUSINESS_ADMIN"));
+  assert.equal(otherDay.entries.length, 0);
+  const first = savedDay.entries[0];
+  assert.equal(
+    (
+      await request(reportPath, "BUSINESS_ADMIN", "PUT", {
+        version: otherDay.version,
+        entries: [{ id: first.id, ...workRows[0] }],
+      })
+    ).status,
+    404,
+  );
+  assert.equal((await request(`${reportPath}?employeeId=${ids.EMPLOYEE}`, "IT_ADMIN")).status, 400);
+  assert.equal((await request(reportPath, "EMPLOYEE", "DELETE")).status, 405);
+  const reduced = savedDay.entries
+    .slice(0, 2)
+    .map(({ id, projectId, projectFileId, description, manHours }) => ({
+      id,
+      projectId,
+      projectFileId,
+      description,
+      manHours,
+    }));
+  savedDay = await data(
+    await request(reportPath, "EMPLOYEE", "PUT", { version: savedDay.version, entries: reduced }),
+  );
+  assert.equal(savedDay.entries.length, 2);
   const assigned = await data(
     await request(`/api/admin/users/${ids.EMPLOYEE}`, "IT_ADMIN", "PATCH", {
       role: "BUSINESS_ADMIN",
@@ -151,6 +205,13 @@ try {
     }),
   );
   assert.equal(off.isActive, false);
+  const historical = await data(await request(reportPath, "EMPLOYEE"));
+  assert.equal(historical.entries[0].fileActive, false);
+  assert.equal((await request(`/reports/${reportDate}`, "EMPLOYEE")).status, 200);
+  const options = await data(
+    await request(`/api/work-entry-options?projectId=${project.id}`, "EMPLOYEE"),
+  );
+  assert.equal(options.length, 0);
   assert.equal(
     (await request(`/api/admin/projects/${project.id}`, "IT_ADMIN", "DELETE")).status,
     405,
@@ -159,10 +220,11 @@ try {
     await request(`/api/admin/users/${ids.EMPLOYEE}`, "IT_ADMIN", "PATCH", { isActive: false }),
   );
   assert.equal((await request("/dashboard", "EMPLOYEE")).headers.get("location"), "/login");
+  assert.equal((await request(reportPath, "EMPLOYEE")).status, 401);
   assert.equal((await request("/api/auth/logout", "IT_ADMIN", "POST", {})).status, 200);
   assert.equal((await request("/dashboard", "IT_ADMIN")).headers.get("location"), "/login");
   console.log(
-    "Production HTTP: role-aware pages, admin APIs, master data, user assignments, deactivation and logout PASS",
+    "Production HTTP: administration, own work reports, decimal totals, concurrent saves, ownership, historical references, deactivation and logout PASS",
   );
 } finally {
   if (server && server.exitCode === null) {

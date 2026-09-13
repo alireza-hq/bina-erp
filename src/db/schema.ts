@@ -7,6 +7,10 @@ import {
   uniqueIndex,
   uuid,
   boolean,
+  date,
+  numeric,
+  check,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { APP_ROLES } from "@/lib/roles";
@@ -107,5 +111,44 @@ export const projectFiles = pgTable(
       sql`lower(trim(${table.code}))`,
     ),
     index("project_files_project_active_idx").on(table.projectId, table.isActive),
+    uniqueIndex("project_files_id_project_idx").on(table.id, table.projectId),
+  ],
+);
+
+export const workEntries = pgTable(
+  "work_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    workDate: date("work_date", { mode: "string" }).notNull(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "restrict" }),
+    projectFileId: uuid("project_file_id").notNull(),
+    description: text("description").notNull(),
+    manHours: numeric("man_hours", { precision: 5, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("work_entries_employee_date_idx").on(table.employeeId, table.workDate),
+    index("work_entries_project_date_idx").on(table.projectId, table.workDate),
+    index("work_entries_project_file_idx").on(table.projectFileId),
+    foreignKey({
+      name: "work_entries_project_file_project_fk",
+      columns: [table.projectFileId, table.projectId],
+      foreignColumns: [projectFiles.id, projectFiles.projectId],
+    }).onDelete("restrict"),
+    check("work_entries_hours_check", sql`${table.manHours} > 0 AND ${table.manHours} <= 24`),
+    check(
+      "work_entries_description_check",
+      sql`length(trim(${table.description})) BETWEEN 1 AND 2000`,
+    ),
+    check(
+      "work_entries_date_check",
+      sql`${table.workDate} BETWEEN DATE '2000-01-01' AND DATE '2099-12-31'`,
+    ),
   ],
 );

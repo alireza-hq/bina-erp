@@ -52,6 +52,9 @@ export function AppHeader({ user }: { user: { displayName: string; role: AppRole
             <House size={17} />
             خانه
           </Link>
+          <Link href="/reports" className={pathname.startsWith("/reports") ? "active" : ""}>
+            گزارش کار من
+          </Link>
           {user.role === "IT_ADMIN" &&
             [
               ["/system/users", "کاربران"],

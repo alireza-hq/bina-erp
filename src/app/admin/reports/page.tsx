@@ -117,6 +117,28 @@ export default async function Page({ searchParams }: PageProps<"/admin/reports">
         لحاظ نمی‌شود.
       </p>
       <BusinessReportFilters key={JSON.stringify(query)} query={query} />
+      <nav className="filter-chips" aria-label="فیلترهای اعمال‌شده">
+        {(["employee", "department", "project", "projectFile"] as const).map((kind) => {
+          const key = `${kind}Id` as const;
+          if (!query[key]) return null;
+          return (
+            <Link
+              key={kind}
+              className="filter-chip"
+              aria-label={`حذف فیلتر ${groupLabels[kind]}`}
+              href={reportHref(query, { [key]: undefined, page: 1, groupPage: 1 })}
+            >
+              {groupLabels[kind]}: <bdi>{result.filterLabels[kind] || "انتخاب فعلی"}</bdi> ×
+            </Link>
+          );
+        })}
+        {query.groupBy && (
+          <span className="filter-chip">
+            {groupLabels[query.groupBy]}
+            {query.groupBySecondary && ` ← ${groupLabels[query.groupBySecondary]}`}
+          </span>
+        )}
+      </nav>
       <ReportExportActions query={query} />
       {period ? (
         <PeriodControl key={JSON.stringify(period)} initial={period} />
@@ -208,12 +230,18 @@ export default async function Page({ searchParams }: PageProps<"/admin/reports">
                 {result.entries.map((row) => (
                   <tr key={row.id}>
                     <td>{formatJalaliDate(row.date)}</td>
-                    <td>{row.employee}</td>
+                    <td>
+                      <bdi>{row.employee}</bdi>
+                    </td>
                     <td>{row.department}</td>
-                    <td>{row.project}</td>
-                    <td>{row.projectFile}</td>
+                    <td>
+                      <bdi>{row.project}</bdi>
+                    </td>
+                    <td>
+                      <bdi>{row.projectFile}</bdi>
+                    </td>
                     <td className="report-description">{row.description}</td>
-                    <td>{hours(row.manHours)}</td>
+                    <td className="numeric">{hours(row.manHours)}</td>
                   </tr>
                 ))}
               </tbody>

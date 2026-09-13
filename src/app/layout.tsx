@@ -8,7 +8,7 @@ const vazirmatn = localFont({
   display: "swap",
   weight: "100 900",
 });
-const description = "زیرساخت داخلی سامانه گزارش کار کارکنان";
+const description = "ثبت فعالیت‌های روزانه و گزارش‌های سازمانی کارکنان";
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
   title: { default: "سامانه گزارش کار کارکنان", template: "%s | سامانه گزارش کار کارکنان" },

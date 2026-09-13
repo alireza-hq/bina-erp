@@ -106,6 +106,112 @@ test("business reporting PostgreSQL: isolated relational and authorization check
       });
       const { parseBusinessReportQuery: parse } = load("src/lib/business-report-query.ts");
       const base = { from: "2026-01-03", to: "2026-01-09" };
+      await t.test(
+        "Phase 6 dashboards: exact weekly totals, ownership and missing-reporter semantics",
+        async () => {
+          const rollbackDashboard = new Error("rollback dashboard fixtures");
+          try {
+            await tx.transaction(async (isolated) => {
+              await isolated
+                .update(schema.users)
+                .set({ isActive: false })
+                .where(sql`${schema.users.ldapId} LIKE 'pending:%'`);
+              const workDates = load("src/lib/work-reporting.ts");
+              const dashboard = load("src/lib/dashboards.ts", {
+                ...mocks,
+                "@/db": { db: isolated },
+                "@/lib/work-reporting": { ...workDates, todayInTehran: () => "2026-01-03" },
+                "next/navigation": {
+                  redirect: (destination) => {
+                    throw new Error(`redirect:${destination}`);
+                  },
+                },
+              });
+              const [missingAssigned, missingUnassigned] = await isolated
+                .insert(schema.users)
+                .values([
+                  {
+                    username: "missing-assigned",
+                    ldapId: "CN=missing-assigned",
+                    displayName: "Missing assigned",
+                    role: "EMPLOYEE",
+                    departmentId: engineering.id,
+                  },
+                  {
+                    username: "missing-unassigned",
+                    ldapId: "CN=missing-unassigned",
+                    displayName: "Missing unassigned",
+                    role: "EMPLOYEE",
+                  },
+                  {
+                    username: "inactive-missing",
+                    ldapId: "CN=inactive-missing",
+                    displayName: "Inactive",
+                    role: "EMPLOYEE",
+                    isActive: false,
+                  },
+                  {
+                    username: "admin-missing",
+                    ldapId: "CN=admin-missing",
+                    displayName: "Admin",
+                    role: "BUSINESS_ADMIN",
+                  },
+                ])
+                .returning();
+              // Entries outside the selected week do not satisfy reporting for this week.
+              await isolated
+                .insert(schema.workEntries)
+                .values(row(missingAssigned, a, fa, "0.25", "2026-01-02"));
+              await isolated
+                .update(schema.users)
+                .set({ isActive: false })
+                .where(eq(schema.users.id, people.reza.id));
+              jar.clear();
+              await assert.rejects(() => dashboard.getBusinessDashboard(), /redirect:\/login/);
+              await assert.rejects(() => dashboard.getEmployeeDashboard(), /redirect:\/login/);
+              jar.set("bina_session", { value: cookies.ali });
+              await assert.rejects(() => dashboard.getBusinessDashboard(), /redirect:\/dashboard/);
+              const own = await dashboard.getEmployeeDashboard();
+              assert.equal(own.today, base.from);
+              assert.equal(own.week.totalHundredths, 650);
+              assert.equal(own.todayReport.totalHundredths, 650);
+              assert.equal(own.reportedDays, 1);
+              assert.equal(own.week.count, 3);
+              for (const actor of ["business", "it"]) {
+                jar.set("bina_session", { value: cookies[actor] });
+                const start = performance.now();
+                const result = await dashboard.getBusinessDashboard();
+                assert.equal(result.report.totalHours, "10.50");
+                assert.equal(result.report.entryCount, 4);
+                assert.deepEqual(result.counts, { reporters: 2, missing: 2, activeProjects: 1 });
+                assert.deepEqual(
+                  new Set(result.missingPeople.map((p) => p.id)),
+                  new Set([missingAssigned.id, missingUnassigned.id]),
+                );
+                assert.equal(result.report.groups.length, 2); // Inactive historical project retained.
+                assert.equal(result.departments.groups.length, 2);
+                assert.equal(result.period.status, "OPEN");
+                console.log(
+                  `Phase 6 dashboard PostgreSQL: ${Math.round(performance.now() - start)}ms`,
+                );
+              }
+              await isolated.insert(schema.reportingPeriods).values({
+                weekStart: base.from,
+                weekEnd: base.to,
+                status: "LOCKED",
+                lockedAt: new Date(),
+                lockedBy: people.business.id,
+              });
+              const locked = await dashboard.getBusinessDashboard();
+              assert.equal(locked.period.status, "LOCKED");
+              assert.equal(locked.report.totalHours, "10.50");
+              throw rollbackDashboard;
+            });
+          } catch (error) {
+            if (error !== rollbackDashboard) throw error;
+          }
+        },
+      );
       const report = (changes) => service.getBusinessReport(parse({ ...base, ...changes }));
       const workbook = load("src/lib/report-workbook.ts");
       const readWorkbook = require("read-excel-file/node");

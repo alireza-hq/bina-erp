@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { users, workEntries, projects, projectFiles } from "@/db/schema";
 import { assertReportingPeriodEditable, getReportingPeriod } from "@/lib/reporting-periods";
@@ -85,7 +85,11 @@ export async function getOwnWorkWeek(employeeId: string, date: string) {
     totalHundredths: 0,
   }));
   const rows = await db
-    .select({ date: workEntries.workDate, manHours: workEntries.manHours })
+    .select({
+      date: workEntries.workDate,
+      manHours: sql<string>`sum(${workEntries.manHours})::text`,
+      count: sql<number>`count(*)::int`,
+    })
     .from(workEntries)
     .where(
       and(
@@ -93,10 +97,11 @@ export async function getOwnWorkWeek(employeeId: string, date: string) {
         gte(workEntries.workDate, start),
         lte(workEntries.workDate, days[6].date),
       ),
-    );
+    )
+    .groupBy(workEntries.workDate);
   for (const row of rows) {
     const day = days.find((day) => day.date === row.date)!;
-    day.count++;
+    day.count = row.count;
     day.totalHundredths += hoursToHundredths(row.manHours)!;
   }
   return {
@@ -104,7 +109,7 @@ export async function getOwnWorkWeek(employeeId: string, date: string) {
     period: await getReportingPeriod(start),
     days,
     totalHundredths: days.reduce((sum, day) => sum + day.totalHundredths, 0),
-    count: rows.length,
+    count: days.reduce((sum, day) => sum + day.count, 0),
   };
 }
 export async function getActiveWorkProjects() {

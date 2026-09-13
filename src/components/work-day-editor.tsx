@@ -35,6 +35,16 @@ const draftRows = (day: OwnDay) =>
     description: row.description,
     manHours: row.manHours,
   }));
+const fingerprint = (rows: Draft[]) =>
+  JSON.stringify(
+    rows.map(({ id, projectId, projectFileId, description, manHours }) => ({
+      id,
+      projectId,
+      projectFileId,
+      description,
+      manHours: hoursToHundredths(manHours) ?? manHours,
+    })),
+  );
 
 function FileSelector({
   row,
@@ -101,6 +111,7 @@ function FileSelector({
   return (
     <>
       <CustomSelect
+        searchable
         value={row.projectFileId}
         onChange={onChange}
         disabled={disabled || !row.projectId || loading || Boolean(error)}
@@ -153,7 +164,33 @@ export function WorkDayEditor({
   const [locked, setLocked] = useState(initialDay.period.status === "LOCKED");
   const readOnly = busy || locked;
   const saving = useRef(false);
-  const [dirty, setDirty] = useState(false);
+  const editor = useRef<HTMLFormElement>(null);
+  const focusRow = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusRow.current) return;
+    editor.current
+      ?.querySelector<HTMLElement>(`[data-row-key="${focusRow.current}"] button`)
+      ?.focus();
+    focusRow.current = null;
+  }, [rows]);
+  function appendRow(source?: Draft) {
+    const key = crypto.randomUUID();
+    const original = day.entries.find((entry) => entry.id === source?.id);
+    const reusable = !original || (original.projectActive && original.fileActive);
+    const next = source
+      ? {
+          ...source,
+          key,
+          id: undefined,
+          ...(!reusable ? { projectId: "", projectFileId: "" } : {}),
+        }
+      : emptyRow(key);
+    focusRow.current = key;
+    setRows((current) => [...current, next]);
+    setSuccess("");
+  }
+  const [savedFingerprint, setSavedFingerprint] = useState(() => fingerprint(rows));
+  const dirty = fingerprint(rows) !== savedFingerprint;
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -161,7 +198,6 @@ export function WorkDayEditor({
   const total = rows.reduce((sum, row) => sum + (hoursToHundredths(row.manHours) ?? 0), 0);
   function updateRow(key: string, change: Partial<Draft>) {
     setRows((rows) => rows.map((row) => (row.key === key ? { ...row, ...change } : row)));
-    setDirty(true);
     setSuccess("");
   }
   useEffect(() => {
@@ -169,8 +205,30 @@ export function WorkDayEditor({
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
     };
+    const leave = (event: MouseEvent) => {
+      const link = (event.target as Element).closest?.("a[href]") as HTMLAnchorElement | null;
+      if (
+        !link ||
+        link.target === "_blank" ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        event.altKey ||
+        event.button !== 0 ||
+        link.href === window.location.href
+      )
+        return;
+      if (!window.confirm("تغییرات ذخیره‌نشده کنار گذاشته شوند؟")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    document.addEventListener("click", leave, true);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      document.removeEventListener("click", leave, true);
+    };
   }, [dirty]);
   function changeDate(date: string) {
     if (!isCalendarDate(date) || date > today) {
@@ -221,7 +279,7 @@ export function WorkDayEditor({
       }
       setDay(value.data);
       setRows(draftRows(value.data));
-      setDirty(false);
+      setSavedFingerprint(fingerprint(draftRows(value.data)));
       setSuccess("گزارش این روز با موفقیت ذخیره شد.");
     } catch (error) {
       setError(
@@ -239,19 +297,14 @@ export function WorkDayEditor({
           <h1>ثبت گزارش کار</h1>
           <p>چند فعالیت را برای یک روز وارد کنید و با هم ذخیره کنید.</p>
         </div>
-        <Link
-          className="secondary-button"
-          href="/reports"
-          onClick={(event) => {
-            if (dirty && !window.confirm("تغییرات ذخیره‌نشده کنار گذاشته شوند؟"))
-              event.preventDefault();
-          }}
-        >
+        <Link className="secondary-button" href="/reports">
           گزارش‌های من
         </Link>
       </header>
       <section className="admin-surface">
-        <p role="status">{locked ? LOCKED_MESSAGE : "این هفته باز است"}</p>
+        <p className={`period-banner ${locked ? "locked" : "open"}`} role="status">
+          {locked ? LOCKED_MESSAGE : "این هفته باز است"}
+        </p>
         <fieldset disabled={busy} className="report-date-field">
           <span>تاریخ</span>
           <JalaliDatePicker value={day.date} onChange={changeDate} ariaLabel="تاریخ گزارش کار" />
@@ -261,7 +314,7 @@ export function WorkDayEditor({
             پروژه فعالی برای ثبت جدید وجود ندارد. با فناوری اطلاعات تماس بگیرید.
           </p>
         )}
-        <form onSubmit={save} noValidate>
+        <form ref={editor} onSubmit={save} noValidate aria-busy={busy}>
           <div className="admin-table-scroll">
             <table className="admin-table work-editor-table">
               <thead>
@@ -284,9 +337,10 @@ export function WorkDayEditor({
                       code: original.projectCode,
                     });
                   return (
-                    <tr key={row.key}>
+                    <tr key={row.key} data-row-key={row.key}>
                       <td>
                         <CustomSelect
+                          searchable
                           value={row.projectId}
                           disabled={readOnly}
                           ariaLabel={`پروژه ردیف ${index + 1}`}
@@ -340,13 +394,26 @@ export function WorkDayEditor({
                       <td>
                         <button
                           type="button"
+                          className="subtle-button"
+                          aria-label={`کپی ردیف ${index + 1}`}
+                          disabled={readOnly || rows.length >= WORK_LIMITS.maxRows}
+                          onClick={() => appendRow(row)}
+                        >
+                          کپی ردیف
+                        </button>
+                        <button
+                          type="button"
                           aria-label={`حذف ردیف ${index + 1}`}
                           className="secondary-button"
                           disabled={readOnly}
                           onClick={() => {
                             setRows((rows) => rows.filter((r) => r.key !== row.key));
-                            setDirty(true);
                             setSuccess("");
+                            requestAnimationFrame(() =>
+                              editor.current
+                                ?.querySelector<HTMLButtonElement>("[data-add-row]")
+                                ?.focus(),
+                            );
                           }}
                         >
                           حذف
@@ -370,15 +437,14 @@ export function WorkDayEditor({
               type="button"
               className="secondary-button"
               disabled={readOnly || rows.length >= WORK_LIMITS.maxRows}
-              onClick={() => {
-                setRows((rows) => [...rows, emptyRow(crypto.randomUUID())]);
-                setDirty(true);
-                setSuccess("");
-              }}
+              data-add-row
+              onClick={() => appendRow()}
             >
               + افزودن ردیف
             </button>
-            <strong>جمع روز: {toPersianDigits(displayHours(total))} نفر-ساعت</strong>
+            <strong aria-live="polite">
+              جمع روز: {toPersianDigits(displayHours(total))} نفر-ساعت
+            </strong>
             <button
               className="primary-button"
               type="submit"
@@ -387,6 +453,13 @@ export function WorkDayEditor({
               {busy ? "در حال ذخیره…" : "ذخیره"}
             </button>
           </div>
+          <p className="admin-help" role="status">
+            {busy
+              ? "در حال ذخیره گزارش؛ لطفاً صبر کنید…"
+              : dirty
+                ? "تغییرات ذخیره‌نشده دارید."
+                : ""}
+          </p>
           <p className="admin-help">
             حداکثر ۵۰ ردیف، ۲۴ ساعت در روز و دو رقم اعشار. تغییرات پس از ذخیره اعمال می‌شوند.
           </p>

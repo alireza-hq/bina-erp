@@ -10,6 +10,7 @@ import {
   type JalaliParts,
 } from "@/lib/jalali";
 import { toPersianDigits } from "@/lib/persian";
+import { todayInTehran } from "@/lib/work-reporting";
 
 const months = [
   "فروردین",
@@ -28,10 +29,7 @@ const months = [
 const weekdays = ["ش", "ی", "د", "س", "چ", "پ", "ج"];
 
 function today() {
-  const now = new Date();
-  return gregorianIsoToJalali(
-    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
-  )!;
+  return gregorianIsoToJalali(todayInTehran())!;
 }
 
 export function JalaliDatePicker({
@@ -47,13 +45,23 @@ export function JalaliDatePicker({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<JalaliParts>(() => selected ?? today());
   const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (open)
+      root.current
+        ?.querySelector<HTMLButtonElement>('[aria-pressed="true"], .jalali-days button')
+        ?.focus();
+  }, [open]);
 
   useEffect(() => {
     function close(event: PointerEvent) {
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     }
     function closeWithKeyboard(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape" && root.current?.contains(document.activeElement)) {
+        setOpen(false);
+        trigger.current?.focus();
+      }
     }
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", closeWithKeyboard);
@@ -80,12 +88,14 @@ export function JalaliDatePicker({
     if (!iso) return;
     onChange(iso);
     setOpen(false);
+    trigger.current?.focus();
   }
 
   return (
     <div className="jalali-date-picker" ref={root}>
       <button
         type="button"
+        ref={trigger}
         className="jalali-date-trigger"
         aria-label={ariaLabel}
         aria-haspopup="dialog"
@@ -99,7 +109,24 @@ export function JalaliDatePicker({
         <CalendarDays size={17} aria-hidden="true" />
       </button>
       {open && (
-        <div className="jalali-picker-popover" role="dialog" aria-label="تقویم شمسی">
+        <div
+          className="jalali-picker-popover"
+          role="dialog"
+          aria-label="تقویم شمسی"
+          onKeyDown={(event) => {
+            if (event.key !== "Tab") return;
+            const buttons = Array.from(
+              event.currentTarget.querySelectorAll<HTMLButtonElement>("button"),
+            );
+            if (event.shiftKey && document.activeElement === buttons[0]) {
+              event.preventDefault();
+              buttons.at(-1)?.focus();
+            } else if (!event.shiftKey && document.activeElement === buttons.at(-1)) {
+              event.preventDefault();
+              buttons[0]?.focus();
+            }
+          }}
+        >
           <div className="jalali-picker-head">
             <button type="button" onClick={() => moveMonth(-1)} aria-label="ماه قبل">
               <ChevronRight size={18} />
@@ -131,6 +158,7 @@ export function JalaliDatePicker({
                   type="button"
                   className={active ? "active" : ""}
                   aria-pressed={active}
+                  aria-label={`${toPersianDigits(day)} ${months[view.month - 1]} ${toPersianDigits(view.year)}`}
                   onClick={() => choose(day)}
                   key={day}
                 >
@@ -148,6 +176,7 @@ export function JalaliDatePicker({
               const iso = jalaliToGregorianIso(current.year, current.month, current.day);
               if (iso) onChange(iso);
               setOpen(false);
+              trigger.current?.focus();
             }}
           >
             امروز

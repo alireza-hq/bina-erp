@@ -35,6 +35,14 @@ export function MasterDataManager({
     event.preventDefault();
     const form = event.currentTarget;
     const values = new FormData(form);
+    if (
+      editing?.isActive &&
+      values.get("isActive") !== "on" &&
+      !window.confirm(
+        `آیا از غیرفعال کردن ${label} «${editing.name}» مطمئن هستید؟ سوابق حفظ می‌شوند.`,
+      )
+    )
+      return;
     setBusy(true);
     setError("");
     setMessage("");
@@ -146,7 +154,7 @@ export function MasterDataManager({
         <h2>{editing ? `ویرایش ${label}` : `افزودن ${label}`}</h2>
         {kind === "files" && (
           <p className="admin-help">
-            مقادیر از پیش تعریف‌شده برای انتخاب در آینده؛ مانند PID-001 یا Vendor Doc 77
+            مقادیر از پیش تعریف‌شده برای انتخاب در گزارش کار؛ مانند PID-001 یا Vendor Doc 77
           </p>
         )}
         {!parentActive && (

@@ -6,7 +6,11 @@ import { useEffect, useRef, useState } from "react";
 import { toPersianDigits } from "@/lib/persian";
 import { roleLabels, type AppRole } from "@/lib/roles";
 
-export function AppHeader({ user }: { user: { displayName: string; role: AppRole } }) {
+export function AppHeader({
+  user,
+}: {
+  user: { displayName: string; role: AppRole; departmentName?: string };
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -18,7 +22,10 @@ export function AppHeader({ user }: { user: { displayName: string; role: AppRole
       if (!account.current?.contains(event.target as Node)) setAccountOpen(false);
     }
     function closeWithKeyboard(event: KeyboardEvent) {
-      if (event.key === "Escape") setAccountOpen(false);
+      if (event.key === "Escape" && account.current?.contains(document.activeElement)) {
+        setAccountOpen(false);
+        account.current?.querySelector<HTMLButtonElement>(".account-trigger")?.focus();
+      }
     }
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", closeWithKeyboard);
@@ -50,10 +57,10 @@ export function AppHeader({ user }: { user: { displayName: string; role: AppRole
         <nav className="main-nav" aria-label="ناوبری اصلی">
           <Link className={pathname.startsWith("/dashboard") ? "active" : ""} href="/dashboard">
             <House size={17} />
-            خانه
+            داشبورد
           </Link>
           <Link href="/reports" className={pathname.startsWith("/reports") ? "active" : ""}>
-            گزارش کار من
+            گزارش‌های من
           </Link>
           {(user.role === "BUSINESS_ADMIN" || user.role === "IT_ADMIN") && (
             <Link
@@ -84,7 +91,6 @@ export function AppHeader({ user }: { user: { displayName: string; role: AppRole
           <button
             type="button"
             className="account-trigger"
-            aria-haspopup="menu"
             aria-expanded={accountOpen}
             onClick={() => setAccountOpen((current) => !current)}
           >
@@ -92,12 +98,13 @@ export function AppHeader({ user }: { user: { displayName: string; role: AppRole
             <span className="account-copy">
               <strong>{toPersianDigits(user.displayName)}</strong>
               <small>{roleLabels[user.role]}</small>
+              {user.departmentName && <small>{user.departmentName}</small>}
             </span>
             <ChevronDown size={15} className="account-chevron" aria-hidden="true" />
           </button>
           {accountOpen && (
-            <div className="account-menu" role="menu">
-              <button className="signout-button" onClick={logout} disabled={busy} role="menuitem">
+            <div className="account-menu">
+              <button className="signout-button" onClick={logout} disabled={busy}>
                 <LogOut size={16} />
                 <span>خروج</span>
               </button>

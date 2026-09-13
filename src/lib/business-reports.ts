@@ -78,16 +78,23 @@ export type ReportGroup = {
   primaryCount: string;
   groupCount: string;
 };
-export async function getBusinessReport(input: BusinessReportQuery) {
-  return runBusinessReport(input);
+export async function getBusinessReport(
+  input: BusinessReportQuery,
+  connection: Pick<typeof db, "transaction"> = db,
+) {
+  return runBusinessReport(input, undefined, connection);
 }
 export async function getBusinessReportExport(input: BusinessReportQuery, mode: ExportMode) {
   return runBusinessReport(input, exportModeSchema.parse(mode));
 }
-async function runBusinessReport(input: BusinessReportQuery, exportMode?: ExportMode) {
+async function runBusinessReport(
+  input: BusinessReportQuery,
+  exportMode?: ExportMode,
+  connection: Pick<typeof db, "transaction"> = db,
+) {
   const q = businessReportSchema.parse(input);
   // One snapshot makes the paged rows, total and groups consistent during concurrent edits.
-  return db.transaction(
+  return connection.transaction(
     async (tx) => {
       const where = predicate(q);
       const [total] = await tx.execute<{ totalHours: string; entryCount: string }>(
@@ -119,7 +126,7 @@ async function runBusinessReport(input: BusinessReportQuery, exportMode?: Export
       }
       // Filter labels are resolved in the same snapshot, including filters matching zero rows.
       let filterLabels: Record<string, string | null> = {};
-      if (exportMode) {
+      if (exportMode || q.employeeId || q.departmentId || q.projectId || q.projectFileId) {
         const [labels] = await tx.execute<Record<string, string | null>>(sql`SELECT
           (SELECT ${employeeLabel} FROM ${u} WHERE ${u.id} = ${q.employeeId ?? null}::uuid) AS employee,
           (SELECT ${d.name} FROM ${d} WHERE ${d.id} = ${q.departmentId ?? null}::uuid) AS department,

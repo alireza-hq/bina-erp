@@ -131,6 +131,11 @@ export function BusinessReportFilters({ query }: { query: BusinessReportQuery })
         }
       }}
     >
+      <h2>انتخاب بازه و فیلترها</h2>
+      <p className="admin-help">
+        پس از تغییر گزینه‌ها «اعمال فیلترها» را بزنید. خروجی Excel از فیلترهای اعمال‌شده استفاده
+        می‌کند.
+      </p>
       <fieldset disabled={pending}>
         <div className="business-filter-grid">
           <div>
@@ -267,7 +272,7 @@ export function BusinessReportFilters({ query }: { query: BusinessReportQuery })
             className="secondary-button"
             onClick={() => startTransition(() => router.push("/admin/reports"))}
           >
-            پاک کردن فیلترها
+            پاک کردن همه · هفته جاری
           </button>
         </div>
         {error && (

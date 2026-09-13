@@ -44,7 +44,10 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
         )}
       </nav>
       <section className="admin-surface">
-        <p role="status">
+        <p
+          className={`period-banner ${report.period.status === "LOCKED" ? "locked" : "open"}`}
+          role="status"
+        >
           {report.period.status === "LOCKED"
             ? "این دوره قفل شده است؛ گزارش‌ها فقط قابل مشاهده هستند."
             : "این هفته باز است"}
@@ -73,17 +76,23 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
             </thead>
             <tbody>
               {report.days.map((day, index) => (
-                <tr key={day.date}>
+                <tr key={day.date} className={day.date === today ? "is-today" : ""}>
                   <td>
                     {["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"][index]}
                   </td>
-                  <td>{formatJalaliDate(day.date)}</td>
+                  <td>
+                    {formatJalaliDate(day.date)} {day.date === today && "· امروز"}
+                  </td>
                   <td>{toPersianDigits(displayHours(day.totalHundredths))}</td>
                   <td>{toPersianDigits(day.count)}</td>
                   <td>
                     {day.date <= today ? (
                       <Link className="subtle-button" href={`/reports/${day.date}`}>
-                        {day.count ? "مشاهده / ویرایش" : "ثبت فعالیت"}
+                        {report.period.status === "LOCKED"
+                          ? "مشاهده"
+                          : day.count
+                            ? "مشاهده / ویرایش"
+                            : "ثبت فعالیت"}
                       </Link>
                     ) : (
                       <span className="admin-help">روز آینده</span>

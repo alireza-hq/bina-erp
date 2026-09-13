@@ -1,6 +1,6 @@
 # Employee Work Reporting System
 
-Phase 5 adds manual weekly locks and a transactional audit trail. Personal work reporting, company filtering/grouping and XLSX exports remain available. Approvals, payroll, notifications and analytics dashboards are not implemented.
+Phase 6 adds role-specific weekly dashboards, searchable work-entry controls, row duplication, clearer reporting filters and RTL/accessibility improvements. Weekly locks, transactional audit, company reporting and XLSX exports retain their existing rules. Approvals, payroll, attendance and notifications are not implemented. See [Phase 6 implementation and manual QA](docs/phase-6.md).
 
 ## Setup and migration
 

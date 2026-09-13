@@ -104,7 +104,13 @@ try {
   for (const role of ["EMPLOYEE", "BUSINESS_ADMIN"]) {
     const dashboard = await request("/dashboard", role);
     assert.equal(dashboard.status, 200);
-    assert.equal((await dashboard.text()).includes('href="/system/users"'), false);
+    const html = await dashboard.text();
+    assert.equal(html.includes('href="/system/users"'), false);
+    assert.ok(html.includes("داشبورد"));
+    assert.ok(
+      html.includes(role === "EMPLOYEE" ? "روزهای این هفته" : "کارکنان بدون گزارش ثبت‌شده"),
+    );
+    assert.equal(html.includes("کارکنان بدون گزارش ثبت‌شده"), role === "BUSINESS_ADMIN");
     for (const path of ["/system/users", "/system/departments", "/system/projects"])
       assert.equal((await request(path, role)).headers.get("location"), "/dashboard");
   }
@@ -163,6 +169,9 @@ try {
   let savedDay = await data(await request(reportPath, "EMPLOYEE"));
   assert.equal(savedDay.totalHours, "6.50");
   assert.equal(savedDay.entries.length, 3);
+  const editorHtml = await (await request(`/reports/${reportDate}`, "EMPLOYEE")).text();
+  assert.ok(editorHtml.includes("کپی ردیف"));
+  assert.ok(editorHtml.includes("نفر-ساعت ردیف"));
   const companyQuery = `from=2026-01-03&to=2026-01-09&groupBy=project&groupBySecondary=employee`;
   const exportPath = `/api/admin/reports/export?${companyQuery}&mode=details&page=5&pageSize=25`;
   assert.equal((await request(exportPath)).status, 401);
@@ -210,7 +219,10 @@ try {
     assert.equal(company.groups[0].primaryHours, "6.50");
     const page = await request(`/admin/reports?${companyQuery}`, role);
     assert.equal(page.status, 200);
-    assert.ok((await page.text()).includes("گزارش‌های سازمان"));
+    const reportHtml = await page.text();
+    assert.ok(reportHtml.includes("گزارش‌های سازمان"));
+    assert.ok(reportHtml.includes("پاک کردن همه"));
+    assert.ok(reportHtml.includes("فیلترهای اعمال‌شده"));
     const dashboard = await request("/dashboard", role);
     assert.ok((await dashboard.text()).includes('href="/admin/reports"'));
   }

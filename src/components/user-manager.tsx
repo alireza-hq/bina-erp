@@ -43,6 +43,14 @@ export function UserManager({
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editing) return;
+    if (
+      !editing.isActive &&
+      rows.find((row) => row.id === editing.id)?.isActive &&
+      !window.confirm(
+        `حساب «${editing.displayName}» غیرفعال شود؟ نشست‌های ورود این کاربر باطل می‌شوند.`,
+      )
+    )
+      return;
     setBusy(true);
     setError("");
     setMessage("");

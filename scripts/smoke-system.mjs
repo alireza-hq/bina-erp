@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID, randomBytes, createHash, createHmac } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, cp } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import nextEnv from "@next/env";
@@ -46,20 +46,26 @@ try {
       `bina_session=${raw}.${createHmac("sha256", secret).update(raw).digest("base64url")}`;
     await sql`insert into sessions (user_id, token_hash, expires_at) values (${user.id}, ${createHash("sha256").update(raw).digest("hex")}, ${new Date(Date.now() + 300000)})`;
   }
-  server = spawn(
-    process.execPath,
-    ["node_modules/next/dist/bin/next", "start", "--port", "3101", "--hostname", "127.0.0.1"],
-    {
-      windowsHide: true,
-      stdio: "pipe",
-      env: {
-        ...process.env,
-        DATABASE_URL: testUrl.toString(),
-        JWT_SECRET: secret,
-        NEXT_PUBLIC_APP_URL: base,
-      },
+  await cp("public", ".next/standalone/public", { recursive: true });
+  await cp(".next/static", ".next/standalone/.next/static", { recursive: true });
+  server = spawn(process.execPath, [".next/standalone/server.js"], {
+    windowsHide: true,
+    stdio: "pipe",
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      PORT: "3101",
+      HOSTNAME: "127.0.0.1",
+      DATABASE_URL: testUrl.toString(),
+      JWT_SECRET: secret,
+      NEXT_PUBLIC_APP_URL: base,
+      APP_ORIGIN: base,
+      ALLOW_INSECURE_HTTP: "true",
+      LDAP_URL: "ldaps://127.0.0.1:16369",
+      LDAP_BASE_DN: "DC=fixture",
+      LDAP_DOMAIN: "fixture",
     },
-  );
+  });
   let output = "";
   server.stdout.on("data", (chunk) => {
     output += chunk;
@@ -89,7 +95,24 @@ try {
     assert.equal(response.status, status, JSON.stringify(value));
     return value.data;
   };
-  assert.equal((await request("/login")).status, 200);
+  const loginResponse = await request("/login");
+  assert.equal(loginResponse.status, 200);
+  assert.equal(loginResponse.headers.get("x-powered-by"), null);
+  assert.equal(loginResponse.headers.get("x-content-type-options"), "nosniff");
+  const loginHtml = await loginResponse.text();
+  const asset = loginHtml.match(/href="([^"]+\.css[^"]*)"/)?.[1];
+  assert.ok(asset, "production CSS reference");
+  assert.equal((await fetch(new URL(asset.replaceAll("&amp;", "&"), base))).status, 200);
+  const health = await request("/api/health");
+  assert.equal(health.status, 200);
+  assert.deepEqual(await health.json(), { status: "ok" });
+  assert.equal(health.headers.get("cache-control"), "no-store");
+  const deniedOrigin = await fetch(`${base}/api/auth/login`, {
+    method: "POST",
+    headers: { origin: "https://untrusted.example", "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "test", password: "test" }),
+  });
+  assert.equal(deniedOrigin.status, 403);
   for (const path of [
     "/dashboard",
     "/system/users",

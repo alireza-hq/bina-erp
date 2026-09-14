@@ -1,6 +1,6 @@
 # Employee Work Reporting System
 
-Phase 6 adds role-specific weekly dashboards, searchable work-entry controls, row duplication, clearer reporting filters and RTL/accessibility improvements. Weekly locks, transactional audit, company reporting and XLSX exports retain their existing rules. Approvals, payroll, attendance and notifications are not implemented. See [Phase 6 implementation and manual QA](docs/phase-6.md).
+Phase 7 hardens the completed work-reporting system for a single-instance HTTPS rollout. See [production security, deployment, backup/restore and smoke-test runbook](docs/phase-7.md). Next.js is patched to 16.3.3; business behavior remains unchanged.
 
 ## Setup and migration
 
@@ -14,7 +14,7 @@ pnpm db:check
 pnpm dev
 ```
 
-Production: `pnpm build`, then `pnpm start`. Production browser sessions require HTTPS. No Docker, Compose, Nginx or CI configuration is present in this repository.
+Production: use the standalone Docker runtime and Nginx example described in the Phase 7 runbook. Production browser sessions require HTTPS by default; startup validates configuration. No CI or Compose deployment is assumed.
 
 | Variable              | Purpose                                                                               |
 | --------------------- | ------------------------------------------------------------------------------------- |

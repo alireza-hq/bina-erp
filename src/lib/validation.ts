@@ -12,7 +12,7 @@ const optionalText = (max: number) =>
 const name = z.string().trim().min(1, "نام الزامی است").max(160);
 const code = z.string().trim().min(1, "کد الزامی است").max(80);
 
-export const loginSchema = z.object({
+export const loginSchema = z.strictObject({
   username: z.string().trim().min(1, "نام کاربری را وارد کنید").max(128),
   password: z.string().min(1, "رمز عبور را وارد کنید").max(512),
 });

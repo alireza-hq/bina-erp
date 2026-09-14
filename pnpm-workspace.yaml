@@ -2,3 +2,7 @@ allowBuilds:
   esbuild: true
   sharp: false
   unrs-resolver: false
+
+# Security patch for Next's optional image processor (GHSA-rgj7-g3m4-5g8c).
+overrides:
+  sharp: 0.35.4

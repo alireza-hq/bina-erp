@@ -1,4 +1,11 @@
 import { Client, escapeFilter } from "ldapts";
+import { canonicalUsername } from "@/lib/login-throttle";
+
+export class DirectoryError extends Error {
+  constructor(readonly kind: "credentials" | "unavailable" | "identity") {
+    super(`Directory authentication: ${kind}`);
+  }
+}
 
 export type DirectoryUser = {
   ldapId: string;
@@ -23,7 +30,7 @@ export async function authenticateDirectoryUser(
   const url = required("LDAP_URL");
   const baseDN = required("LDAP_BASE_DN");
   const domain = required("LDAP_DOMAIN");
-  const account = inputUsername.trim().replace(/^.*\\/, "").split("@")[0].toLowerCase();
+  const account = canonicalUsername(inputUsername);
   const bindIdentity =
     inputUsername.includes("@") || inputUsername.includes("\\")
       ? inputUsername
@@ -52,14 +59,25 @@ export async function authenticateDirectoryUser(
       timeLimit: 8,
     });
     const entry = result.searchEntries[0] as unknown as Record<string, unknown> | undefined;
-    if (!entry) throw new Error("Directory user was authenticated but not found");
+    if (
+      !entry ||
+      !(attribute(entry, "distinguishedName") || attribute(entry, "dn")) ||
+      !attribute(entry, "sAMAccountName")
+    )
+      throw new DirectoryError("identity");
     const username = attribute(entry, "sAMAccountName") || account;
     return {
-      ldapId: attribute(entry, "distinguishedName") || String(entry.dn || username),
+      ldapId: attribute(entry, "distinguishedName") || attribute(entry, "dn"),
       username: username.toLowerCase(),
       displayName: attribute(entry, "displayName") || username,
       email: attribute(entry, "mail") || attribute(entry, "userPrincipalName") || null,
     };
+  } catch (error) {
+    if (error instanceof DirectoryError) throw error;
+    const ldap = error as { code?: number; name?: string };
+    throw new DirectoryError(
+      ldap?.code === 49 || ldap?.name === "InvalidCredentialsError" ? "credentials" : "unavailable",
+    );
   } finally {
     await client.unbind().catch(() => undefined);
   }

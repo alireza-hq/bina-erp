@@ -7,10 +7,15 @@ const globalDatabase = globalThis as unknown as { binaSql?: ReturnType<typeof po
 const client =
   globalDatabase.binaSql ??
   postgres(process.env.DATABASE_URL, {
-    max: 10,
+    max: Number(process.env.DB_POOL_MAX || 10),
     prepare: false,
     idle_timeout: 20,
     connect_timeout: 10,
+    connection: {
+      statement_timeout: 60000,
+      lock_timeout: 15000,
+      idle_in_transaction_session_timeout: 60000,
+    },
   });
 if (process.env.NODE_ENV !== "production") globalDatabase.binaSql = client;
 export const db = drizzle(client, { schema });

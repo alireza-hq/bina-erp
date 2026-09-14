@@ -2,12 +2,17 @@ import nextEnv from "@next/env";
 import postgres from "postgres";
 nextEnv.loadEnvConfig(process.cwd());
 const username = process.argv[2]?.trim().toLowerCase();
-if (!username || !/^[^\s\\@]+$/.test(username)) {
+if (!username || username.length > 128 || !/^[^\s\\@]+$/.test(username)) {
   console.error("Usage: pnpm admin:promote <existing-canonical-ldap-username>");
   process.exit(1);
 }
-const sql = postgres(process.env.DATABASE_URL, { max: 1, connect_timeout: 10 });
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL is required");
+  process.exit(1);
+}
+let sql;
 try {
+  sql = postgres(process.env.DATABASE_URL, { max: 1, connect_timeout: 10 });
   await sql.begin(async (tx) => {
     await tx`select pg_advisory_xact_lock(8172401)`;
     const rows =
@@ -21,8 +26,12 @@ try {
   });
   console.log("IT_ADMIN promotion completed for the explicitly selected account.");
 } catch (error) {
-  console.error(error.code || error.message);
+  console.error(
+    error.message === "No active, LDAP-provisioned user matched. Log in once before promotion."
+      ? error.message
+      : "Admin promotion failed; check database connectivity and migrations.",
+  );
   process.exitCode = 1;
 } finally {
-  await sql.end();
+  await sql?.end();
 }

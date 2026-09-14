@@ -15,6 +15,8 @@ export async function periodApi(request: Request, week: string, action?: "lock" 
       : await getReportingPeriod(week);
     return Response.json({ ok: true, data }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
+    if (!(error instanceof ZodError) && !(error instanceof PeriodError))
+      operationalLog("period.failed", error);
     return jsonError(
       error instanceof ZodError
         ? error.issues[0].message
@@ -25,3 +27,4 @@ export async function periodApi(request: Request, week: string, action?: "lock" 
     );
   }
 }
+import { operationalLog } from "@/lib/operational-log";

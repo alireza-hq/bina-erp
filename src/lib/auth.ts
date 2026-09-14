@@ -7,6 +7,8 @@ import { sessions, users, type AppUser } from "@/db/schema";
 import type { DirectoryUser } from "./ldap";
 import type { AppRole } from "@/lib/roles";
 import { jsonError } from "@/lib/api";
+import { publicOrigin, secureSessionCookie } from "@/lib/runtime-config";
+import { operationalLog } from "@/lib/operational-log";
 
 const COOKIE_NAME = "bina_session";
 const SESSION_DAYS = 7;
@@ -27,6 +29,7 @@ function signedToken(raw: string) {
   return `${raw}.${signature(raw)}`;
 }
 function verifySignedToken(value: string) {
+  if (value.length > 256) return null;
   const separator = value.lastIndexOf(".");
   if (separator < 1) return null;
   const raw = value.slice(0, separator);
@@ -81,7 +84,7 @@ export async function createSession(userId: string) {
   (await cookies()).set(COOKIE_NAME, signedToken(raw), {
     httpOnly: true,
     sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
+    secure: secureSessionCookie(),
     path: "/",
     expires: expiresAt,
     priority: "high",
@@ -125,7 +128,13 @@ export async function requireRole(...roles: [AppRole, ...AppRole[]]) {
 export async function requireApiRole(request: Request, ...roles: [AppRole, ...AppRole[]]) {
   if (!["GET", "HEAD"].includes(request.method) && !hasSameOrigin(request))
     return { error: jsonError("درخواست غیرمجاز است", 403) } as const;
-  const user = await getCurrentUser();
+  let user: AppUser | null;
+  try {
+    user = await getCurrentUser();
+  } catch (error) {
+    operationalLog("auth.session_lookup_failed", error);
+    return { error: jsonError("سرویس موقتاً در دسترس نیست. دوباره تلاش کنید.", 503) } as const;
+  }
   if (!user) return { error: jsonError("ابتدا وارد سامانه شوید", 401) } as const;
   if (!roles.includes(user.role)) return { error: jsonError("دسترسی کافی ندارید", 403) } as const;
   return { user } as const;
@@ -133,9 +142,15 @@ export async function requireApiRole(request: Request, ...roles: [AppRole, ...Ap
 export function hasSameOrigin(request: Request) {
   const origin = request.headers.get("origin");
   if (!origin || request.headers.get("sec-fetch-site") === "cross-site") return false;
-  const allowed = [new URL(request.url).origin];
+  const allowed = process.env.NODE_ENV === "production" ? [] : [new URL(request.url).origin];
   // Explicit public URL supports TLS termination without trusting forwarded headers.
-  if (process.env.NEXT_PUBLIC_APP_URL)
-    allowed.push(new URL(process.env.NEXT_PUBLIC_APP_URL).origin);
+  const configured = publicOrigin();
+  if (configured) {
+    try {
+      allowed.push(new URL(configured).origin);
+    } catch {
+      return false;
+    }
+  }
   return allowed.includes(origin);
 }

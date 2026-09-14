@@ -25,6 +25,7 @@ function failure(error: unknown) {
     const row = typeof issue?.path[1] === "number" ? `ردیف ${issue.path[1] + 1}: ` : "";
     return jsonError(row + (issue?.message || "اطلاعات نامعتبر است"));
   }
+  operationalLog("work.request_failed", error);
   return jsonError("عملیات گزارش کار انجام نشد. دوباره تلاش کنید.", 500);
 }
 async function boundedJson(request: Request) {
@@ -96,3 +97,4 @@ export async function workOptionsApi(request: Request) {
     return failure(error);
   }
 }
+import { operationalLog } from "@/lib/operational-log";

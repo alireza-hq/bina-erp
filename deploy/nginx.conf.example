@@ -1,0 +1,49 @@
+# Install inside nginx's http context; adapt DNS and certificate paths before nginx -t.
+limit_req_zone $binary_remote_addr zone=work_login:10m rate=10r/m;
+log_format work_reporting '$remote_addr $request_method $uri $status $request_time';
+
+server {
+    listen 80;
+    server_name reports.example.internal;
+    return 308 https://reports.example.internal$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name reports.example.internal;
+    ssl_certificate /etc/nginx/tls/reports.crt;
+    ssl_certificate_key /etc/nginx/tls/reports.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    server_tokens off;
+    access_log /var/log/nginx/work-reporting.log work_reporting;
+    client_max_body_size 512k;
+    client_body_timeout 15s;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # Overwrite, never append client-supplied proxy identity headers.
+    proxy_set_header Host reports.example.internal;
+    proxy_set_header X-Forwarded-Host reports.example.internal;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 120s;
+    proxy_send_timeout 120s;
+    proxy_buffering off;
+
+    location = /api/auth/login {
+        limit_req zone=work_login burst=10 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:3000;
+    }
+    location = /api/health {
+        allow 127.0.0.1;
+        # Add the actual internal monitoring subnet here if needed.
+        deny all;
+        proxy_pass http://127.0.0.1:3000;
+    }
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+    }
+}

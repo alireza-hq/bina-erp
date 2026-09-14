@@ -13,6 +13,7 @@ export async function businessReportApi(request: Request, options = false) {
       : await getBusinessReport(parseBusinessReportQuery(input));
     return Response.json({ ok: true, data }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
+    if (!(error instanceof ZodError)) operationalLog("report.failed", error);
     return jsonError(
       error instanceof ZodError
         ? error.issues[0]?.message || "فیلتر نامعتبر است"
@@ -21,3 +22,4 @@ export async function businessReportApi(request: Request, options = false) {
     );
   }
 }
+import { operationalLog } from "@/lib/operational-log";

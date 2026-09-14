@@ -13,9 +13,11 @@ export async function auditApi(request: Request) {
     );
     return Response.json({ ok: true, data }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
+    if (!(error instanceof ZodError)) operationalLog("audit.query_failed", error);
     return jsonError(
       error instanceof ZodError ? error.issues[0].message : "رویدادها دریافت نشد",
       error instanceof ZodError ? 400 : 500,
     );
   }
 }
+import { operationalLog } from "@/lib/operational-log";

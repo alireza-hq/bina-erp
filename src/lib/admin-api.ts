@@ -31,6 +31,7 @@ function failure(error: unknown) {
   const code = cause?.code || cause?.cause?.code;
   if (code === "23505") return jsonError("نام یا کد تکراری است. مقدار دیگری وارد کنید.", 409);
   if (code === "23503") return jsonError("رکورد مرتبط معتبر نیست یا هنوز استفاده می‌شود.", 409);
+  operationalLog("admin.mutation_failed", error);
   return jsonError("عملیات انجام نشد. دوباره تلاش کنید.", 500);
 }
 const validId = (id: string) => idSchema.safeParse(id).success;
@@ -241,3 +242,4 @@ export async function updateUser(request: Request, id: string) {
     return failure(error);
   }
 }
+import { operationalLog } from "@/lib/operational-log";

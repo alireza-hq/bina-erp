@@ -187,13 +187,15 @@ test("login validates input, rejects bad/inactive accounts, rate limits and crea
   const f = fixture();
   let invalid = false;
   let calls = 0;
+  const { DirectoryError } = load("src/lib/ldap.ts");
   const mocks = {
     ...f.mocks,
     "@/lib/auth": { ...f.auth, syncDirectoryUser: async () => f.user },
     "@/lib/ldap": {
+      DirectoryError,
       authenticateDirectoryUser: async () => {
         calls++;
-        if (invalid) throw new Error("private LDAP error");
+        if (invalid) throw new DirectoryError("credentials");
         return {};
       },
     },
@@ -217,6 +219,7 @@ test("login validates input, rejects bad/inactive accounts, rate limits and crea
   assert.equal((await route.POST(request(input))).status, 403);
   assert.equal(f.rows.length, 0);
   f.user.isActive = true;
+  assert.equal((await route.POST(request(input))).status, 200);
   invalid = true;
   for (let i = 0; i < 5; i++) {
     const response = await route.POST(request(input));

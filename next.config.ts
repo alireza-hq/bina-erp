@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
+  poweredByHeader: false,
   allowedDevOrigins: ["172.22.1.165"],
   reactCompiler: true,
   async headers() {

@@ -1,34 +1,42 @@
-import { authenticateDirectoryUser } from "@/lib/ldap";
+import { authenticateDirectoryUser, DirectoryError } from "@/lib/ldap";
 import { createSession, hasSameOrigin, syncDirectoryUser } from "@/lib/auth";
 import { jsonError, parseJson } from "@/lib/api";
 import { loginSchema } from "@/lib/validation";
-
-const attempts = new Map<string, { count: number; resetAt: number }>();
-function attemptKey(request: Request, username: string) {
-  return `${request.headers.get("x-forwarded-for")?.split(",")[0] || "local"}:${username.toLowerCase()}`;
-}
+import { loginThrottle } from "@/lib/login-throttle";
+import { operationalLog } from "@/lib/operational-log";
 export async function POST(request: Request) {
   if (!hasSameOrigin(request)) return jsonError("درخواست غیرمجاز است", 403);
   const parsed = await parseJson(request, loginSchema);
   if ("error" in parsed) return parsed.error;
-  const key = attemptKey(request, parsed.data.username);
-  const now = Date.now();
-  const record = attempts.get(key);
-  if (record && record.resetAt > now && record.count >= 5)
-    return jsonError("تلاش‌های ورود بیش از حد است. ۱۵ دقیقه دیگر دوباره تلاش کنید.", 429);
+  const attempt = loginThrottle.reserve(request, parsed.data.username);
+  if ("retryAfter" in attempt) {
+    const response = jsonError("تلاش‌های ورود بیش از حد است. کمی بعد دوباره تلاش کنید.", 429);
+    response.headers.set("Retry-After", String(attempt.retryAfter));
+    return response;
+  }
+  let result: "success" | "failure" | "unavailable" = "unavailable";
   try {
     const user = await authenticateDirectoryUser(parsed.data.username, parsed.data.password).then(
       syncDirectoryUser,
     );
-    if (!user.isActive) return jsonError("این حساب غیرفعال است.", 403);
+    if (!user.isActive) {
+      result = "failure";
+      return jsonError("این حساب غیرفعال است.", 403);
+    }
     await createSession(user.id);
-    attempts.delete(key);
+    result = "success";
     return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
-  } catch {
-    const current =
-      record && record.resetAt > now ? record : { count: 0, resetAt: now + 15 * 60_000 };
-    current.count += 1;
-    attempts.set(key, current);
-    return jsonError("نام کاربری یا رمز عبور صحیح نیست.", 401);
+  } catch (error) {
+    if (error instanceof DirectoryError && error.kind === "credentials") {
+      result = "failure";
+      return jsonError("نام کاربری یا رمز عبور صحیح نیست.", 401);
+    }
+    operationalLog(
+      error instanceof DirectoryError ? `ldap.${error.kind}` : "auth.login_service_failed",
+      error,
+    );
+    return jsonError("سرویس ورود موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.", 503);
+  } finally {
+    attempt.finish(result);
   }
 }

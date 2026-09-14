@@ -1,6 +1,27 @@
 name: employee-work-reporting
 
 services:
+  db:
+    image: postgres:17-bookworm
+    env_file:
+      - docker.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   app:
     image: employee-work-reporting:local
     build:
@@ -14,6 +35,9 @@ services:
       PORT: "3000"
     ports:
       - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
@@ -31,6 +55,12 @@ services:
     profiles: [tools]
     env_file:
       - docker.env
+    depends_on:
+      db:
+        condition: service_healthy
     init: true
     restart: "no"
     command: [pnpm, db:check]
+
+volumes:
+  postgres_data:

@@ -47,3 +47,6 @@ next-env.d.ts
 /docker.env
 /docker.env.*
 !/docker.env.example
+
+# Database backup archives
+*.dump

@@ -29,11 +29,11 @@ Never log, store or commit LDAP passwords. CLI scripts use Next.js environment l
 
 ## Docker Compose
 
-Compose runs the production app against your existing PostgreSQL server. It reads runtime configuration directly from `docker.env`; no `--env-file` flag is required. The app uses the Dockerfile health check and binds only to `127.0.0.1:3000` for the host Nginx proxy in `deploy/nginx.conf.example`.
+Compose runs PostgreSQL 17 and the production app together. PostgreSQL uses the persistent `postgres_data` named volume and is reachable as `db:5432` only inside the Compose network; no database port is published to the host. The app and operator commands wait for database readiness. It reads runtime configuration directly from `docker.env`; no `--env-file` flag is required. The app uses the Dockerfile health check and binds only to `127.0.0.1:3000` for the host Nginx proxy in `deploy/nginx.conf.example`.
 
 ```sh
 cp docker.env.example docker.env
-# Edit docker.env: database, LDAP, existing session secret, and public HTTPS origin.
+# Edit docker.env: matching POSTGRES_* / DATABASE_URL credentials, LDAP, session secret, HTTPS origin.
 docker compose config --quiet
 docker compose build app operations
 # Back up the target database and review migrations before this explicit upgrade:
@@ -45,9 +45,9 @@ curl --fail http://127.0.0.1:3000/api/health
 docker compose logs --tail=100 app
 ```
 
-In PowerShell, use `Copy-Item docker.env.example docker.env` instead of `cp`. Fill in the placeholders before starting. `docker.env` is ignored by Git and excluded from image build contexts; restrict its filesystem permissions. Avoid printing `docker compose config` without `--quiet`, because resolved configuration contains secrets. Container `localhost` is not the database host; the example uses Docker Desktop's `host.docker.internal`. For Linux, use your database's reachable hostname/IP.
+In PowerShell, use `Copy-Item docker.env.example docker.env` instead of `cp`. Fill in the placeholders before starting. `docker.env` is ignored by Git and excluded from image build contexts; restrict its filesystem permissions. Avoid printing `docker compose config` without `--quiet`, because resolved configuration contains secrets. Use `db` as the database hostname in `DATABASE_URL`. Keep its username/password/database consistent with `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`. These initialization variables only affect an empty volume; changing them later does not rotate existing database credentials. The example uses the initial PostgreSQL administrator for setup; for production, provision a restricted app role and separate operator credentials following the Phase 7 runbook.
 
-The `operations` service is profile-gated so normal `docker compose up -d` starts only the app; explicit `run` commands can still invoke it. Migrations never run automatically at startup. Operator commands use the same database credentials from `docker.env`; use a protected operator environment with migration privileges if the application role is restricted, as described in the production runbook.
+The `operations` service is profile-gated so normal `docker compose up -d` starts the database and app; explicit `run` commands can still invoke it. Migrations never run automatically at startup. Operator commands use the same database credentials from `docker.env`; use a protected operator environment with migration privileges if the application role is restricted, as described in the production runbook.
 
 ```sh
 # After the selected administrator's first successful LDAP login:
@@ -56,11 +56,23 @@ docker compose run --rm operations pnpm admin:promote canonical.username
 docker compose run --rm operations pnpm sessions:cleanup
 # Recreate after changing docker.env:
 docker compose up -d --force-recreate app
-# Stop containers (the external database is unaffected):
+# Stop containers; the named PostgreSQL volume and its data are retained:
 docker compose down
 ```
 
-For local HTTP testing, follow the origin/security overrides in `docker.env.example`. Production keeps HTTPS cookies and LDAPS required. The Docker engine must be running in Linux-container mode. This configuration runs one app instance, matching the in-process throttle/export limits; it does not provision PostgreSQL or TLS certificates.
+For local HTTP testing, follow the origin/security overrides in `docker.env.example`. Production keeps HTTPS cookies and LDAPS required. The Docker engine must be running in Linux-container mode. This configuration runs one app instance, matching the in-process throttle/export limits; it does not provision TLS certificates. `docker compose down` retains the database; do not add `--volumes` unless you intentionally want to delete its data. Existing external database data is not imported automatically; back up and restore it deliberately before switching the app.
+
+### Container database backup
+
+Create a PostgreSQL custom-format backup inside the container, then copy it to protected host storage (avoids binary shell-redirection issues on Windows):
+
+```sh
+docker compose exec db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f /tmp/work-reporting.dump'
+docker compose cp db:/tmp/work-reporting.dump ./work-reporting.dump
+docker compose exec db rm /tmp/work-reporting.dump
+```
+
+Keep backups outside Git and the image build context. Follow the Phase 7 restore drill before relying on backups; changing the PostgreSQL major image version requires an explicit database upgrade/restore, not simply reusing the old data volume.
 
 ## Identity, roles and authorization
 

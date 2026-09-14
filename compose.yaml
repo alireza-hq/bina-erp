@@ -1,0 +1,36 @@
+name: employee-work-reporting
+
+services:
+  app:
+    image: employee-work-reporting:local
+    build:
+      context: .
+      target: runner
+    env_file:
+      - docker.env
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  operations:
+    image: employee-work-reporting-operations:local
+    build:
+      context: .
+      target: operations
+    profiles: [tools]
+    env_file:
+      - docker.env
+    init: true
+    restart: "no"
+    command: [pnpm, db:check]

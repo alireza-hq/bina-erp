@@ -12,3 +12,7 @@ coverage
 .agents
 tests
 docs
+
+# Never send runtime secrets to the image builder
+docker.env
+docker.env.*

@@ -42,3 +42,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Docker runtime secrets
+/docker.env
+/docker.env.*
+!/docker.env.example

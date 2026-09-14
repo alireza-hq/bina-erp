@@ -14,7 +14,7 @@ pnpm db:check
 pnpm dev
 ```
 
-Production: use the standalone Docker runtime and Nginx example described in the Phase 7 runbook. Production browser sessions require HTTPS by default; startup validates configuration. No CI or Compose deployment is assumed.
+Production: use the standalone Docker runtime and Nginx example described in the Phase 7 runbook. Production browser sessions require HTTPS by default; startup validates configuration. Compose setup is documented below.
 
 | Variable              | Purpose                                                                               |
 | --------------------- | ------------------------------------------------------------------------------------- |
@@ -26,6 +26,41 @@ Production: use the standalone Docker runtime and Nginx example described in the
 | `NEXT_PUBLIC_APP_URL` | Exact public origin including scheme/port; configure behind HTTPS-terminating proxies |
 
 Never log, store or commit LDAP passwords. CLI scripts use Next.js environment loading. Changing the session secret invalidates existing cookies.
+
+## Docker Compose
+
+Compose runs the production app against your existing PostgreSQL server. It reads runtime configuration directly from `docker.env`; no `--env-file` flag is required. The app uses the Dockerfile health check and binds only to `127.0.0.1:3000` for the host Nginx proxy in `deploy/nginx.conf.example`.
+
+```sh
+cp docker.env.example docker.env
+# Edit docker.env: database, LDAP, existing session secret, and public HTTPS origin.
+docker compose config --quiet
+docker compose build app operations
+# Back up the target database and review migrations before this explicit upgrade:
+docker compose run --rm operations pnpm db:migrate
+docker compose run --rm operations pnpm db:check
+docker compose up -d app
+docker compose ps
+curl --fail http://127.0.0.1:3000/api/health
+docker compose logs --tail=100 app
+```
+
+In PowerShell, use `Copy-Item docker.env.example docker.env` instead of `cp`. Fill in the placeholders before starting. `docker.env` is ignored by Git and excluded from image build contexts; restrict its filesystem permissions. Avoid printing `docker compose config` without `--quiet`, because resolved configuration contains secrets. Container `localhost` is not the database host; the example uses Docker Desktop's `host.docker.internal`. For Linux, use your database's reachable hostname/IP.
+
+The `operations` service is profile-gated so normal `docker compose up -d` starts only the app; explicit `run` commands can still invoke it. Migrations never run automatically at startup. Operator commands use the same database credentials from `docker.env`; use a protected operator environment with migration privileges if the application role is restricted, as described in the production runbook.
+
+```sh
+# After the selected administrator's first successful LDAP login:
+docker compose run --rm operations pnpm admin:promote canonical.username
+# Schedule daily through the host scheduler:
+docker compose run --rm operations pnpm sessions:cleanup
+# Recreate after changing docker.env:
+docker compose up -d --force-recreate app
+# Stop containers (the external database is unaffected):
+docker compose down
+```
+
+For local HTTP testing, follow the origin/security overrides in `docker.env.example`. Production keeps HTTPS cookies and LDAPS required. The Docker engine must be running in Linux-container mode. This configuration runs one app instance, matching the in-process throttle/export limits; it does not provision PostgreSQL or TLS certificates.
 
 ## Identity, roles and authorization
 

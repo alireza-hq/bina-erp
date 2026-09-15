@@ -21,22 +21,35 @@ export const userAdminSchema = z
     role: z.enum(APP_ROLES).optional(),
     isActive: z.boolean().optional(),
     departmentId: idSchema.nullable().optional(),
-    employeeCode: optionalText(80).optional(),
+    displayName: z.string().trim().min(2).max(160).optional(),
   })
   .refine((value) => Object.keys(value).length > 0, "تغییری ارسال نشده است");
 
+export const profileSchema = z.strictObject({
+  displayName: z.string().trim().min(2, "نام و نام خانوادگی الزامی است").max(160),
+  departmentId: idSchema,
+});
 export const departmentSchema = z.strictObject({
+  managerUserId: idSchema.nullable().optional(),
   name,
   code: optionalText(80).optional(),
   isActive: z.boolean().default(true),
 });
 export const projectSchema = z.strictObject({
+  managerUserId: idSchema.nullable().optional(),
   code,
   name,
   description: optionalText(2000).optional(),
   isActive: z.boolean().default(true),
 });
-export const projectFileSchema = projectSchema;
+export const reportSchema = z.strictObject({
+  name,
+  description: optionalText(2000).optional(),
+  isActive: z.boolean().default(true),
+});
+export const reportUpdateSchema = reportSchema
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, "تغییری ارسال نشده است");
 export const departmentUpdateSchema = departmentSchema
   .partial()
   .extend({ isActive: z.boolean().optional() })

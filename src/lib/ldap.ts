@@ -11,7 +11,6 @@ export type DirectoryUser = {
   ldapId: string;
   username: string;
   displayName: string;
-  email: string | null;
 };
 function required(name: "LDAP_URL" | "LDAP_BASE_DN" | "LDAP_DOMAIN") {
   const value = process.env[name];
@@ -48,13 +47,7 @@ export async function authenticateDirectoryUser(
     const result = await client.search(baseDN, {
       scope: "sub",
       filter: escapeFilter`(&(objectCategory=person)(objectClass=user)(sAMAccountName=${account}))`,
-      attributes: [
-        "distinguishedName",
-        "sAMAccountName",
-        "displayName",
-        "mail",
-        "userPrincipalName",
-      ],
+      attributes: ["distinguishedName", "sAMAccountName", "displayName"],
       sizeLimit: 1,
       timeLimit: 8,
     });
@@ -70,7 +63,6 @@ export async function authenticateDirectoryUser(
       ldapId: attribute(entry, "distinguishedName") || attribute(entry, "dn"),
       username: username.toLowerCase(),
       displayName: attribute(entry, "displayName") || username,
-      email: attribute(entry, "mail") || attribute(entry, "userPrincipalName") || null,
     };
   } catch (error) {
     if (error instanceof DirectoryError) throw error;

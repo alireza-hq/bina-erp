@@ -9,7 +9,7 @@ import { roleLabels, type AppRole } from "@/lib/roles";
 export function AppHeader({
   user,
 }: {
-  user: { displayName: string; role: AppRole; departmentName?: string };
+  user: { displayName: string; role: AppRole; departmentName?: string; isManager?: boolean };
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -62,6 +62,7 @@ export function AppHeader({
           <Link href="/reports" className={pathname.startsWith("/reports") ? "active" : ""}>
             گزارش‌های من
           </Link>
+          {user.isManager && <Link href="/approvals">تأیید گزارش‌ها</Link>}
           {(user.role === "BUSINESS_ADMIN" || user.role === "IT_ADMIN") && (
             <Link
               href="/admin/reports"
@@ -75,6 +76,7 @@ export function AppHeader({
               ["/system/users", "کاربران"],
               ["/system/departments", "واحدها"],
               ["/system/projects", "پروژه‌ها"],
+              ["/system/reports", "گزارش‌ها"],
               ["/system/audit", "رویدادهای سیستم"],
             ].map(([href, label]) => (
               <Link key={href} href={href} className={pathname.startsWith(href) ? "active" : ""}>

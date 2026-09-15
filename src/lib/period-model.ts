@@ -6,7 +6,7 @@ export const periodWeekSchema = z
     (value) => isCalendarDate(value) && weekStart(value) === value,
     "شروع دوره باید تاریخ معتبر روز شنبه باشد",
   );
-export const LOCKED_MESSAGE = "این هفته توسط مدیریت بسته شده و امکان ویرایش گزارش‌ها وجود ندارد.";
+export const LOCKED_MESSAGE = "این تاریخ خارج از هفته جاری است و امکان ویرایش گزارش‌ها وجود ندارد.";
 export class PeriodError extends Error {
   constructor(
     message: string,

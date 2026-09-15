@@ -1,6 +1,6 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { departments, projects, projectFiles, sessions, users } from "@/db/schema";
+import { departments, projects, reportTypes, sessions, users } from "@/db/schema";
 import { requireApiRole } from "@/lib/auth";
 import { jsonError, parseJson } from "@/lib/api";
 import { auditMasterChange } from "@/lib/audit";
@@ -8,7 +8,8 @@ import {
   departmentSchema,
   departmentUpdateSchema,
   idSchema,
-  projectFileSchema,
+  reportSchema,
+  reportUpdateSchema,
   projectSchema,
   projectUpdateSchema,
   userAdminSchema,
@@ -35,18 +36,28 @@ function failure(error: unknown) {
   return jsonError("عملیات انجام نشد. دوباره تلاش کنید.", 500);
 }
 const validId = (id: string) => idSchema.safeParse(id).success;
-type Master = "departments" | "projects";
+type Master = "departments" | "projects" | "reports";
 
 export async function masterCollection(request: Request, kind: Master) {
   const actor = await requireApiRole(request, "IT_ADMIN");
   if ("error" in actor) return actor.error;
-  const table = kind === "departments" ? departments : projects;
+  const table = kind === "departments" ? departments : kind === "projects" ? projects : reportTypes;
   try {
     if (request.method === "GET") return ok(await db.select().from(table).orderBy(asc(table.name)));
+    if (kind === "reports") {
+      const parsed = await parseJson(request, reportSchema);
+      if ("error" in parsed) return parsed.error;
+      return await db.transaction(async (tx) => {
+        const [row] = await tx.insert(reportTypes).values(parsed.data).returning();
+        await auditMasterChange(tx, actor.user.id, "REPORT", row.id, null, row);
+        return ok(row, 201);
+      });
+    }
     if (kind === "departments") {
       const parsed = await parseJson(request, departmentSchema);
       if ("error" in parsed) return parsed.error;
       return await db.transaction(async (tx) => {
+        await validateManager(tx, parsed.data.managerUserId, parsed.data.isActive);
         const [row] = await tx.insert(departments).values(parsed.data).returning();
         await auditMasterChange(tx, actor.user.id, "DEPARTMENT", row.id, null, row);
         return ok(row, 201);
@@ -55,6 +66,7 @@ export async function masterCollection(request: Request, kind: Master) {
     const parsed = await parseJson(request, projectSchema);
     if ("error" in parsed) return parsed.error;
     return await db.transaction(async (tx) => {
+      await validateManager(tx, parsed.data.managerUserId, parsed.data.isActive);
       const [row] = await tx.insert(projects).values(parsed.data).returning();
       await auditMasterChange(tx, actor.user.id, "PROJECT", row.id, null, row);
       return ok(row, 201);
@@ -69,6 +81,25 @@ export async function masterItem(request: Request, kind: Master, id: string) {
   if ("error" in actor) return actor.error;
   if (!validId(id)) return jsonError("شناسه نامعتبر است");
   try {
+    if (kind === "reports") {
+      const parsed = await parseJson(request, reportUpdateSchema);
+      if ("error" in parsed) return parsed.error;
+      return await db.transaction(async (tx) => {
+        const [before] = await tx
+          .select()
+          .from(reportTypes)
+          .where(eq(reportTypes.id, id))
+          .for("update");
+        if (!before) return jsonError("گزارش پیدا نشد", 404);
+        const [row] = await tx
+          .update(reportTypes)
+          .set({ ...parsed.data, updatedAt: new Date() })
+          .where(eq(reportTypes.id, id))
+          .returning();
+        await auditMasterChange(tx, actor.user.id, "REPORT", id, before, row);
+        return ok(row);
+      });
+    }
     if (kind === "departments") {
       const parsed = await parseJson(request, departmentUpdateSchema);
       if ("error" in parsed) return parsed.error;
@@ -79,6 +110,13 @@ export async function masterItem(request: Request, kind: Master, id: string) {
           .where(eq(departments.id, id))
           .for("update");
         if (!before) return jsonError("واحد پیدا نشد", 404);
+        await validateManager(
+          tx,
+          parsed.data.managerUserId === undefined
+            ? before.managerUserId
+            : parsed.data.managerUserId,
+          parsed.data.isActive ?? before.isActive,
+        );
         const [row] = await tx
           .update(departments)
           .set({ ...parsed.data, updatedAt: new Date() })
@@ -93,6 +131,11 @@ export async function masterItem(request: Request, kind: Master, id: string) {
     return await db.transaction(async (tx) => {
       const [before] = await tx.select().from(projects).where(eq(projects.id, id)).for("update");
       if (!before) return jsonError("پروژه پیدا نشد", 404);
+      await validateManager(
+        tx,
+        parsed.data.managerUserId === undefined ? before.managerUserId : parsed.data.managerUserId,
+        parsed.data.isActive ?? before.isActive,
+      );
       const [row] = await tx
         .update(projects)
         .set({ ...parsed.data, updatedAt: new Date() })
@@ -106,87 +149,14 @@ export async function masterItem(request: Request, kind: Master, id: string) {
   }
 }
 
-export async function projectFileCollection(request: Request, projectId: string) {
-  const actor = await requireApiRole(request, "IT_ADMIN");
-  if ("error" in actor) return actor.error;
-  if (!validId(projectId)) return jsonError("شناسه نامعتبر است");
-  try {
-    const data = await db.transaction(async (tx) => {
-      // Serialize creation with project deactivation; inactive parents cannot gain new options.
-      const [project] = await tx
-        .select()
-        .from(projects)
-        .where(eq(projects.id, projectId))
-        .for("update");
-      if (!project) throw new AdminError("پروژه پیدا نشد", 404);
-      if (request.method === "GET")
-        return tx
-          .select()
-          .from(projectFiles)
-          .where(eq(projectFiles.projectId, projectId))
-          .orderBy(asc(projectFiles.code));
-      if (!project.isActive) throw new AdminError("ابتدا پروژه را فعال کنید", 409);
-      const parsed = await parseJson(request, projectFileSchema);
-      if ("error" in parsed) return parsed.error;
-      const row = (
-        await tx
-          .insert(projectFiles)
-          .values({ ...parsed.data, projectId })
-          .returning()
-      )[0];
-      await auditMasterChange(tx, actor.user.id, "PROJECT_FILE", row.id, null, row);
-      return row;
-    });
-    return data instanceof Response ? data : ok(data, request.method === "GET" ? 200 : 201);
-  } catch (error) {
-    return failure(error);
-  }
-}
-
-export async function projectFileItem(request: Request, projectId: string, id: string) {
-  const actor = await requireApiRole(request, "IT_ADMIN");
-  if ("error" in actor) return actor.error;
-  if (!validId(projectId) || !validId(id)) return jsonError("شناسه نامعتبر است");
-  const parsed = await parseJson(request, projectUpdateSchema);
-  if ("error" in parsed) return parsed.error;
-  try {
-    return await db.transaction(async (tx) => {
-      const [project] = await tx
-        .select()
-        .from(projects)
-        .where(eq(projects.id, projectId))
-        .for("update");
-      if (!project) throw new AdminError("پروژه پیدا نشد", 404);
-      const [file] = await tx
-        .select()
-        .from(projectFiles)
-        .where(and(eq(projectFiles.id, id), eq(projectFiles.projectId, projectId)));
-      if (!file) throw new AdminError("فایل پروژه پیدا نشد", 404);
-      if (parsed.data.isActive === true && !file.isActive && !project.isActive)
-        throw new AdminError("ابتدا پروژه را فعال کنید", 409);
-      const [row] = await tx
-        .update(projectFiles)
-        .set({ ...parsed.data, updatedAt: new Date() })
-        .where(and(eq(projectFiles.id, id), eq(projectFiles.projectId, projectId)))
-        .returning();
-      await auditMasterChange(tx, actor.user.id, "PROJECT_FILE", id, file, row);
-      return ok(row);
-    });
-  } catch (error) {
-    return failure(error);
-  }
-}
-
 // Only application/directory display fields are exposed; never session tokens or LDAP DNs.
 export const userAdminColumns = {
   id: users.id,
   username: users.username,
   displayName: users.displayName,
-  email: users.email,
   role: users.role,
   isActive: users.isActive,
   departmentId: users.departmentId,
-  employeeCode: users.employeeCode,
   lastLoginAt: users.lastLoginAt,
 };
 export async function userCollection(request: Request) {
@@ -231,7 +201,15 @@ export async function updateUser(request: Request, id: string) {
       }
       const [row] = await tx
         .update(users)
-        .set({ ...data, updatedAt: new Date() })
+        .set({
+          ...data,
+          profileCompletedAt:
+            (data.displayName ?? target.displayName).trim().length >= 2 &&
+            (data.departmentId === undefined ? target.departmentId : data.departmentId)
+              ? (target.profileCompletedAt ?? (data.displayName !== undefined ? new Date() : null))
+              : null,
+          updatedAt: new Date(),
+        })
         .where(eq(users.id, id))
         .returning(userAdminColumns);
       if (data.isActive === false) await tx.delete(sessions).where(eq(sessions.userId, id));
@@ -243,3 +221,16 @@ export async function updateUser(request: Request, id: string) {
   }
 }
 import { operationalLog } from "@/lib/operational-log";
+
+async function validateManager(
+  tx: import("@/lib/audit").Transaction,
+  id: string | null | undefined,
+  active: boolean,
+) {
+  if (!id) {
+    if (active) throw new AdminError("برای فعال‌سازی، مدیر تعیین کنید", 409);
+    return;
+  }
+  const [manager] = await tx.select().from(users).where(eq(users.id, id)).for("share");
+  if (!manager?.isActive) throw new AdminError("مدیر باید کاربر فعال سامانه باشد", 409);
+}

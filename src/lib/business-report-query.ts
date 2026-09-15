@@ -1,19 +1,14 @@
+import { WORK_STATUSES } from "@/lib/approval-model";
 import { z } from "zod";
 import { isCalendarDate, shiftDate, todayInTehran, weekStart } from "@/lib/work-reporting";
 
 export const REPORT_ROLES = ["BUSINESS_ADMIN", "IT_ADMIN"] as const;
-export const GROUP_DIMENSIONS = [
-  "employee",
-  "department",
-  "project",
-  "projectFile",
-  "date",
-] as const;
+export const GROUP_DIMENSIONS = ["employee", "department", "project", "report", "date"] as const;
 export const groupLabels = {
   employee: "کارمند",
   department: "واحد",
   project: "پروژه",
-  projectFile: "فایل پروژه",
+  report: "گزارش",
   date: "تاریخ",
 };
 export const REPORT_MAX_DAYS = 366;
@@ -27,11 +22,12 @@ export const businessReportSchema = z
     employeeId: optionalId,
     departmentId: optionalId,
     projectId: optionalId,
-    projectFileId: optionalId,
+    reportId: optionalId,
+    status: z.enum([...WORK_STATUSES, "ALL"]).default("APPROVED"),
     groupBy: z.enum(GROUP_DIMENSIONS).optional(),
     groupBySecondary: z.enum(GROUP_DIMENSIONS).optional(),
     sort: z
-      .enum(["date", "employee", "department", "project", "projectFile", "manHours"])
+      .enum(["date", "employee", "department", "project", "report", "manHours"])
       .default("date"),
     direction: z.enum(["asc", "desc"]).default("desc"),
     page,
@@ -82,7 +78,7 @@ export function reportHours(value: string) {
 }
 export const reportOptionsSchema = z
   .object({
-    kind: z.enum(["employee", "department", "project", "projectFile"]),
+    kind: z.enum(["employee", "department", "project", "report"]),
     search: z.string().trim().max(100).default(""),
     projectId: optionalId,
     departmentId: optionalId,

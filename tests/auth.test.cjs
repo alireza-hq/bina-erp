@@ -12,6 +12,8 @@ function fixture() {
     id: "user-1",
     username: "employee",
     displayName: "Employee",
+    departmentId: "department-1",
+    profileCompletedAt: new Date(),
     isActive: true,
     role: "EMPLOYEE",
   };
@@ -160,6 +162,8 @@ test("LDAP binds, escapes the search, maps identity and unbinds on success/failu
             distinguishedName: "CN=Employee,DC=test",
             sAMAccountName: "Employee",
             displayName: "Employee",
+            departmentId: "department-1",
+            profileCompletedAt: new Date(),
             mail: "employee@test",
           },
         ],

@@ -57,6 +57,13 @@
       "when": 1789288064925,
       "tag": "0007_reporting_periods_and_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789395656422,
+      "tag": "0008_two_stage_approval",
+      "breakpoints": true
     }
   ]
 }

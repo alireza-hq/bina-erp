@@ -11,7 +11,7 @@ test("master input validation rejects invalid roles/IDs, unknown relationship fi
   assert.equal(v.projectSchema.safeParse({ code: " ", name: "Test" }).success, false);
   assert.equal(v.departmentSchema.safeParse({ name: " " }).success, false);
   assert.equal(
-    v.projectFileSchema.safeParse({ code: "PID-001", name: "PID", projectId: "anything" }).success,
+    v.reportSchema.safeParse({ code: "PID-001", name: "PID", projectId: "anything" }).success,
     false,
   );
   assert.equal(v.projectUpdateSchema.safeParse({}).success, false);

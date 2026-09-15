@@ -1,27 +1,26 @@
 "use client";
 
-import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { CustomSelect } from "@/components/custom-select";
 
 export type MasterRow = {
   id: string;
   name: string;
-  code: string | null;
+  code?: string | null;
+  managerUserId?: string | null;
   description?: string | null;
   isActive: boolean;
 };
 export function MasterDataManager({
   initialRows,
   kind,
-  projectId,
-  parentActive = true,
+  managers = [],
 }: {
   initialRows: MasterRow[];
-  kind: "departments" | "projects" | "files";
-  projectId?: string;
-  parentActive?: boolean;
+  kind: "departments" | "projects" | "reports";
+  managers?: { id: string; displayName: string; username: string; isActive: boolean }[];
 }) {
+  const [managerUserId, setManager] = useState("");
   const [rows, setRows] = useState(initialRows);
   const [editing, setEditing] = useState<MasterRow | null>(null);
   const [query, setQuery] = useState("");
@@ -29,8 +28,8 @@ export function MasterDataManager({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const label = kind === "departments" ? "واحد" : kind === "projects" ? "پروژه" : "فایل پروژه";
-  const url = kind === "files" ? `/api/admin/projects/${projectId}/files` : `/api/admin/${kind}`;
+  const label = kind === "departments" ? "واحد" : kind === "projects" ? "پروژه" : "گزارش";
+  const url = kind === "reports" ? "/api/admin/reports-master" : `/api/admin/${kind}`;
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -52,7 +51,9 @@ export function MasterDataManager({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: values.get("name"),
-          code: values.get("code") || null,
+          ...(kind !== "reports"
+            ? { code: values.get("code") || null, managerUserId: managerUserId || null }
+            : {}),
           ...(kind !== "departments" ? { description: values.get("description") || null } : {}),
           isActive: values.get("isActive") === "on",
         }),
@@ -65,6 +66,7 @@ export function MasterDataManager({
           : [...current, result.data],
       );
       setEditing(null);
+      setManager("");
       form.reset();
       setMessage("تغییرات ذخیره شد.");
     } catch (error) {
@@ -107,8 +109,9 @@ export function MasterDataManager({
           <table className="admin-table">
             <thead>
               <tr>
-                <th>کد</th>
+                {kind !== "reports" && <th>کد</th>}
                 <th>نام</th>
+                {kind !== "reports" && <th>مدیر</th>}
                 <th>وضعیت</th>
                 <th>عملیات</th>
               </tr>
@@ -116,8 +119,14 @@ export function MasterDataManager({
             <tbody>
               {visible.map((row) => (
                 <tr key={row.id}>
-                  <td dir="auto">{row.code || "—"}</td>
+                  {kind !== "reports" && <td dir="auto">{row.code || "—"}</td>}
                   <td>{row.name}</td>
+                  {kind !== "reports" && (
+                    <td>
+                      {managers.find((m) => m.id === row.managerUserId)?.displayName ||
+                        "مدیر تعیین نشده"}
+                    </td>
+                  )}
                   <td>
                     <span className={`status-label ${row.isActive ? "on" : "off"}`}>
                       {row.isActive ? "فعال" : "غیرفعال"}
@@ -130,17 +139,13 @@ export function MasterDataManager({
                         disabled={busy}
                         onClick={() => {
                           setEditing(row);
+                          setManager(row.managerUserId || "");
                           setError("");
                           setMessage("");
                         }}
                       >
                         ویرایش
                       </button>
-                      {kind === "projects" && (
-                        <Link className="subtle-button" href={`/system/projects/${row.id}`}>
-                          جزئیات و فایل‌ها
-                        </Link>
-                      )}
                     </div>
                   </td>
                 </tr>
@@ -152,32 +157,42 @@ export function MasterDataManager({
       </section>
       <section className="admin-surface">
         <h2>{editing ? `ویرایش ${label}` : `افزودن ${label}`}</h2>
-        {kind === "files" && (
-          <p className="admin-help">
-            مقادیر از پیش تعریف‌شده برای انتخاب در گزارش کار؛ مانند PID-001 یا Vendor Doc 77
-          </p>
-        )}
-        {!parentActive && (
-          <p className="form-alert">
-            پروژه غیرفعال است. افزودن یا فعال‌سازی مجدد فایل نیازمند فعال بودن پروژه است.
-          </p>
-        )}
         <form key={editing?.id || "new"} onSubmit={save} className="admin-form">
-          <fieldset disabled={busy || (!editing && !parentActive)}>
+          <fieldset disabled={busy}>
             <label className="field">
               نام
               <input name="name" required maxLength={160} defaultValue={editing?.name || ""} />
             </label>
-            <label className="field">
-              کد {kind === "departments" && "(اختیاری)"}
-              <input
-                name="code"
-                dir="auto"
-                required={kind !== "departments"}
-                maxLength={80}
-                defaultValue={editing?.code || ""}
-              />
-            </label>
+            {kind !== "reports" && (
+              <>
+                {" "}
+                <label className="field">
+                  کد {kind === "departments" && "(اختیاری)"}
+                  <input
+                    name="code"
+                    dir="auto"
+                    required={kind !== "departments"}
+                    maxLength={80}
+                    defaultValue={editing?.code || ""}
+                  />
+                </label>
+                <CustomSelect
+                  searchable
+                  ariaLabel="مدیر"
+                  value={managerUserId}
+                  onChange={setManager}
+                  options={[
+                    { value: "", label: "انتخاب مدیر" },
+                    ...managers
+                      .filter((m) => m.isActive || m.id === managerUserId)
+                      .map((m) => ({
+                        value: m.id,
+                        label: `${m.displayName} / ${m.username}${m.isActive ? "" : " (غیرفعال)"}`,
+                      })),
+                  ]}
+                />
+              </>
+            )}
             {kind !== "departments" && (
               <label className="field">
                 توضیحات
@@ -203,6 +218,7 @@ export function MasterDataManager({
                   type="button"
                   onClick={() => {
                     setEditing(null);
+                    setManager("");
                     setError("");
                   }}
                 >

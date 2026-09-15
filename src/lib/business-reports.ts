@@ -11,7 +11,7 @@ import {
   users as u,
   departments as d,
   projects as p,
-  projectFiles as f,
+  reportTypes as f,
 } from "@/db/schema";
 import {
   businessReportSchema,
@@ -19,10 +19,10 @@ import {
   type BusinessReportQuery,
 } from "@/lib/business-report-query";
 
-const source = sql`${w} JOIN ${u} ON ${w.employeeId} = ${u.id} LEFT JOIN ${d} ON ${u.departmentId} = ${d.id} JOIN ${p} ON ${w.projectId} = ${p.id} JOIN ${f} ON ${w.projectFileId} = ${f.id}`;
-const employeeLabel = sql`${u.displayName} || ' / ' || ${u.username} || coalesce(' / ' || ${u.employeeCode}, '')`;
+const source = sql`${w} JOIN ${u} ON ${w.employeeId} = ${u.id} LEFT JOIN ${d} ON ${u.departmentId} = ${d.id} JOIN ${p} ON ${w.projectId} = ${p.id} JOIN ${f} ON ${w.reportId} = ${f.id}`;
+const employeeLabel = sql`${u.displayName} || ' / ' || ${u.username}`;
 const projectLabel = sql`${p.code} || ' — ' || ${p.name}`;
-const fileLabel = sql`${p.code} || ' — ' || ${p.name} || ' / ' || ${f.code} || ' — ' || ${f.name}`;
+const fileLabel = sql`${f.name}`;
 const dimensions = {
   employee: { key: sql`${u.id}::text`, label: employeeLabel },
   department: {
@@ -30,7 +30,7 @@ const dimensions = {
     label: sql`coalesce(${d.name}, 'بدون واحد')`,
   },
   project: { key: sql`${p.id}::text`, label: projectLabel },
-  projectFile: { key: sql`${f.id}::text`, label: fileLabel },
+  report: { key: sql`${f.id}::text`, label: fileLabel },
   date: { key: sql`${w.workDate}::text`, label: sql`${w.workDate}::text` },
 };
 const sortColumns = {
@@ -38,7 +38,7 @@ const sortColumns = {
   employee: u.displayName,
   department: d.name,
   project: p.name,
-  projectFile: f.code,
+  report: f.name,
   manHours: w.manHours,
 };
 function predicate(q: BusinessReportQuery) {
@@ -47,9 +47,10 @@ function predicate(q: BusinessReportQuery) {
     [q.employeeId, w.employeeId],
     [q.departmentId, u.departmentId],
     [q.projectId, w.projectId],
-    [q.projectFileId, w.projectFileId],
+    [q.reportId, w.reportId],
   ] as const)
     if (value) parts.push(sql`${column} = ${value}::uuid`);
+  if (q.status !== "ALL") parts.push(sql`${w.status} = ${q.status}`);
   return sql.join(parts, sql` AND `);
 }
 export type ReportEntry = {
@@ -57,13 +58,13 @@ export type ReportEntry = {
   date: string;
   employee: string;
   employeeName: string;
-  employeeCode: string | null;
   username: string;
   department: string;
   project: string;
   projectCode: string;
   projectName: string;
-  projectFile: string;
+  report: string;
+  status: (typeof import("@/lib/approval-model").WORK_STATUSES)[number];
   description: string;
   manHours: string;
 };
@@ -106,7 +107,7 @@ async function runBusinessReport(
         exportMode === "summary"
           ? []
           : await tx.execute<ReportEntry>(
-              sql`SELECT ${w.id} AS id, ${w.workDate}::text AS date, ${employeeLabel} AS employee, ${u.displayName} AS "employeeName", ${u.employeeCode} AS "employeeCode", ${u.username} AS username, coalesce(${d.name}, 'بدون واحد') AS department, ${projectLabel} AS project, ${p.code} AS "projectCode", ${p.name} AS "projectName", ${fileLabel} AS "projectFile", ${w.description} AS description, ${w.manHours}::text AS "manHours" FROM ${source} WHERE ${where} ORDER BY ${sortColumns[q.sort]} ${q.direction === "asc" ? sql`ASC` : sql`DESC`} NULLS LAST, ${u.displayName} ASC, ${w.id} ASC LIMIT ${exportMode ? EXPORT_MAX_ROWS : q.pageSize} OFFSET ${exportMode ? 0 : (q.page - 1) * q.pageSize}`,
+              sql`SELECT ${w.id} AS id, ${w.workDate}::text AS date, ${employeeLabel} AS employee, ${u.displayName} AS "employeeName", ${u.username} AS username, coalesce(${d.name}, 'بدون واحد') AS department, ${projectLabel} AS project, ${p.code} AS "projectCode", ${p.name} AS "projectName", ${fileLabel} AS "report", ${w.status} AS status, ${w.description} AS description, ${w.manHours}::text AS "manHours" FROM ${source} WHERE ${where} ORDER BY ${sortColumns[q.sort]} ${q.direction === "asc" ? sql`ASC` : sql`DESC`} NULLS LAST, ${u.displayName} ASC, ${w.id} ASC LIMIT ${exportMode ? EXPORT_MAX_ROWS : q.pageSize} OFFSET ${exportMode ? 0 : (q.page - 1) * q.pageSize}`,
             );
       let groups: ReportGroup[] = [];
       let groupCount = 0;
@@ -126,12 +127,12 @@ async function runBusinessReport(
       }
       // Filter labels are resolved in the same snapshot, including filters matching zero rows.
       let filterLabels: Record<string, string | null> = {};
-      if (exportMode || q.employeeId || q.departmentId || q.projectId || q.projectFileId) {
+      if (exportMode || q.employeeId || q.departmentId || q.projectId || q.reportId) {
         const [labels] = await tx.execute<Record<string, string | null>>(sql`SELECT
           (SELECT ${employeeLabel} FROM ${u} WHERE ${u.id} = ${q.employeeId ?? null}::uuid) AS employee,
           (SELECT ${d.name} FROM ${d} WHERE ${d.id} = ${q.departmentId ?? null}::uuid) AS department,
           (SELECT ${projectLabel} FROM ${p} WHERE ${p.id} = ${q.projectId ?? null}::uuid) AS project,
-          (SELECT ${fileLabel} FROM ${f} JOIN ${p} ON ${f.projectId} = ${p.id} WHERE ${f.id} = ${q.projectFileId ?? null}::uuid) AS "projectFile"`);
+          (SELECT ${fileLabel} FROM ${f} WHERE ${f.id} = ${q.reportId ?? null}::uuid) AS "report"`);
         filterLabels = labels;
       }
       return {
@@ -159,18 +160,16 @@ export async function getReportFilterOptions(input: unknown) {
     },
     department: { source: sql`${d}`, id: d.id, label: sql`${d.name}`, active: d.isActive },
     project: { source: sql`${p}`, id: p.id, label: projectLabel, active: p.isActive },
-    projectFile: {
-      source: sql`${f} JOIN ${p} ON ${f.projectId} = ${p.id}`,
+    report: {
+      source: sql`${f}`,
       id: f.id,
       label: fileLabel,
-      active: sql`${f.isActive} AND ${p.isActive}`,
+      active: f.isActive,
     },
   }[q.kind];
   const restrictions: SQL[] = [sql`true`];
   if (q.kind === "employee" && q.departmentId)
     restrictions.push(sql`${u.departmentId} = ${q.departmentId}::uuid`);
-  if (q.kind === "projectFile" && q.projectId)
-    restrictions.push(sql`${f.projectId} = ${q.projectId}::uuid`);
   const label = sql`${config.label} || CASE WHEN ${config.active} THEN '' ELSE ' (غیرفعال)' END`;
   // Literal substring search, not user-controlled SQL or wildcard patterns.
   const rows = await db.execute<ReportOption>(

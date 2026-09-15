@@ -52,10 +52,9 @@ if (process.argv.includes("--authenticated")) {
       await tx`insert into public.sessions (user_id, token_hash, expires_at) values (${id}, ${hash}, ${new Date(Date.now() + 60_000)})`;
     });
     response = await request("/dashboard", { headers: { cookie } });
-    assert.equal(response.status, 200);
-    const html = await response.text();
-    assert.match(html, /Phase 0 smoke test/);
-    assert.match(html, /گزارش کار روزانه/);
+    assert.equal(response.status, 307);
+    assert.equal(response.headers.get("location"), "/onboarding");
+    assert.equal((await request("/onboarding", { headers: { cookie } })).status, 200);
     assert.equal(
       (await request("/login", { headers: { cookie } })).headers.get("location"),
       "/dashboard",

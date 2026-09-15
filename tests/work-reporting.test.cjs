@@ -45,7 +45,7 @@ test("Gregorian dates validate strictly; weeks start Saturday and today uses Teh
 test("work bodies bound rows, descriptions and totals; reject impersonation, duplicate IDs and numeric JSON hours", () => {
   const row = {
     projectId: randomUUID(),
-    projectFileId: randomUUID(),
+    reportId: randomUUID(),
     description: "Review",
     manHours: "1.50",
   };
@@ -71,7 +71,7 @@ test("work bodies bound rows, descriptions and totals; reject impersonation, dup
     validation.dailyEntriesSchema.safeParse({ ...body, entries: Array(51).fill(row) }).success,
     false,
   );
-  for (const description of [" ", "a".repeat(2001)])
+  for (const description of ["a".repeat(2001)])
     assert.equal(
       validation.dailyEntriesSchema.safeParse({ ...body, entries: [{ ...row, description }] })
         .success,
@@ -98,4 +98,11 @@ test("work bodies bound rows, descriptions and totals; reject impersonation, dup
     false,
   );
   assert.equal(validation.dailyEntriesSchema.safeParse({ ...body, entries: [] }).success, true);
+});
+
+test("remarks are optional but Report and ownership are validated", () => {
+  const v = load("src/lib/work-validation.ts");
+  const row = { projectId: randomUUID(), reportId: randomUUID(), manHours: "1" };
+  assert.equal(v.workRowSchema.parse(row).description, "");
+  assert.equal(v.workRowSchema.safeParse({ ...row, employeeId: randomUUID() }).success, false);
 });

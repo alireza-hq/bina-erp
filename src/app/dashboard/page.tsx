@@ -1,10 +1,8 @@
+import { statusLabels } from "@/lib/approval-model";
 import Link from "next/link";
-import { eq } from "drizzle-orm";
-import { AppHeader } from "@/components/app-header";
+import { AuthenticatedHeader } from "@/components/authenticated-header";
 import { ReportExportActions } from "@/components/report-export-actions";
 import { requireUser } from "@/lib/auth";
-import { db } from "@/db";
-import { departments } from "@/db/schema";
 import { getEmployeeDashboard, getBusinessDashboard } from "@/lib/dashboards";
 import { reportHref, reportHours } from "@/lib/business-report-query";
 import { displayHours, shiftDate } from "@/lib/work-reporting";
@@ -30,7 +28,7 @@ function PeriodBadge({ locked }: { locked: boolean }) {
   );
 }
 async function EmployeeDashboard() {
-  const { today, week, todayReport, reportedDays } = await getEmployeeDashboard();
+  const { today, week, todayReport, reportedDays, statuses } = await getEmployeeDashboard();
   const locked = week.period.status === "LOCKED";
   return (
     <>
@@ -42,6 +40,13 @@ async function EmployeeDashboard() {
         <Metric label="این هفته · نفر-ساعت" value={displayHours(week.totalHundredths)} />
         <Metric label="امروز · نفر-ساعت" value={displayHours(todayReport.totalHundredths)} />
         <Metric label="روزهای دارای گزارش" value={reportedDays} />
+        {statuses.map((s) => (
+          <Metric
+            key={s.status}
+            label={statusLabels[s.status as keyof typeof statusLabels]}
+            value={s.count}
+          />
+        ))}
       </div>
       <div className="admin-actions dashboard-actions">
         <Link className="primary-button" href={`/reports/${today}`}>
@@ -100,10 +105,10 @@ async function BusinessDashboard() {
       </p>
       <PeriodBadge locked={period.status === "LOCKED"} />
       <div className="metric-grid">
-        <Metric label="جمع نفر-ساعت" value={hours(report.totalHours)} />
+        <Metric label="نفر-ساعت تأییدشده" value={hours(report.totalHours)} />
         <Metric label="ردیف‌های فعالیت" value={report.entryCount} />
         <Metric label="افراد دارای گزارش · همه نقش‌ها" value={counts.reporters} />
-        <Metric label="کارکنان فعال بدون گزارش" value={counts.missing} />
+        <Metric label="کارکنان فعال بدون گزارش تأییدشده" value={counts.missing} />
         <Metric label="پروژه‌های فعال دارای گزارش" value={counts.activeProjects} />
       </div>
       <div className="dashboard-actions">
@@ -143,10 +148,10 @@ async function BusinessDashboard() {
         ))}
       </div>
       <section className="admin-surface">
-        <h2>کارکنان بدون گزارش ثبت‌شده</h2>
+        <h2>کارکنان بدون گزارش تأییدشده</h2>
         <p className="admin-help">
-          فقط حساب‌های فعال با نقش کارمند، با یا بدون واحد، که در این هفته هیچ فعالیتی ثبت
-          نکرده‌اند. این فهرست نشان‌دهنده غیبت نیست.
+          فقط کارکنان فعال با مشخصات تکمیل‌شده که در این هفته گزارش تأییدشده ندارند. این فهرست
+          نشان‌دهنده غیبت نیست.
         </p>
         {!counts.missing ? (
           <p className="admin-empty">کارمند فعالی بدون گزارش در این هفته وجود ندارد.</p>
@@ -173,7 +178,7 @@ async function BusinessDashboard() {
           </p>
         )}
         <p className="admin-help">
-          واحدها بر اساس واحد فعلی کارمند هستند؛ قفل دوره، واحد سازمانی را ثابت نمی‌کند.
+          واحدها بر اساس واحد فعلی کارمند هستند؛ گذشت هفته، واحد سازمانی را ثابت نمی‌کند.
         </p>
       </section>
     </>
@@ -181,14 +186,9 @@ async function BusinessDashboard() {
 }
 export default async function DashboardPage() {
   const user = await requireUser();
-  const department = user.departmentId
-    ? await db.query.departments.findFirst({ where: eq(departments.id, user.departmentId) })
-    : null;
   return (
     <div className="app-frame">
-      <AppHeader
-        user={{ displayName: user.displayName, role: user.role, departmentName: department?.name }}
-      />
+      <AuthenticatedHeader user={user} />
       <main className="content" id="main-content">
         <header className="page-title">
           <div>

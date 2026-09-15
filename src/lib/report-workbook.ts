@@ -1,3 +1,4 @@
+import { statusLabels } from "@/lib/approval-model";
 // Node-only writer: imported exclusively by the server export route and tests.
 import writeExcelFile, { type CellObject, type SheetData } from "write-excel-file/node";
 import type { getBusinessReportExport } from "@/lib/business-reports";
@@ -58,26 +59,26 @@ export async function createReportWorkbook(
       header([
         "تاریخ شمسی",
         "نام کارمند",
-        "کد پرسنلی",
         "نام کاربری",
         "واحد فعلی",
         "کد پروژه",
         "پروژه",
-        "فایل پروژه",
-        "شرح فعالیت",
+        "گزارش",
+        "توضیحات / ملاحظات",
         "نفر-ساعت",
+        "وضعیت تأیید",
       ]),
       ...data.entries.map((row) => [
         workbookText(formatJalaliDate(row.date)),
         workbookText(row.employeeName),
-        workbookText(row.employeeCode),
         workbookText(row.username),
         workbookText(row.department),
         workbookText(row.projectCode),
         workbookText(row.projectName),
-        workbookText(row.projectFile),
+        workbookText(row.report),
         workbookText(row.description),
         workbookNumber(row.manHours),
+        workbookText(statusLabels[row.status]),
       ]),
     ];
     widths = [16, 26, 16, 24, 24, 18, 30, 40, 65, 16];
@@ -114,6 +115,10 @@ export async function createReportWorkbook(
   }
   const metadata: SheetData = [
     header(["مشخصات گزارش", "مقدار"]),
+    [
+      workbookText("وضعیت تأیید"),
+      workbookText(q.status === "ALL" ? "همه وضعیت‌ها" : statusLabels[q.status]),
+    ],
     [workbookText("نوع گزارش"), workbookText(mode === "details" ? "تفصیلی" : "خلاصه")],
     [workbookText("از تاریخ (شمسی)"), workbookText(formatJalaliDate(q.from))],
     [workbookText("تا تاریخ (شمسی، شامل روز پایان)"), workbookText(formatJalaliDate(q.to))],
@@ -149,7 +154,7 @@ export async function createReportWorkbook(
       workbookText("مجموع ثابت محاسبه‌شده در سرور؛ پس از ویرایش فایل به‌روز نمی‌شود"),
     ],
   ];
-  for (const dimension of ["employee", "department", "project", "projectFile"] as const)
+  for (const dimension of ["employee", "department", "project", "report"] as const)
     metadata.push([
       workbookText(groupLabels[dimension]),
       workbookText(

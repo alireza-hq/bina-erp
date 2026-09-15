@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+const { load } = createRequire(import.meta.url)("../tests/helpers.cjs");
+const dates = load("src/lib/work-reporting.ts");
 import assert from "node:assert/strict";
 import { randomUUID, randomBytes, createHash, createHmac } from "node:crypto";
 import { readFile, cp } from "node:fs/promises";
@@ -29,7 +32,8 @@ try {
     for (const entry of JSON.parse(await readFile("drizzle/meta/_journal.json", "utf8")).entries) {
       const source = (await readFile(`drizzle/${entry.tag}.sql`, "utf8"))
         .replaceAll('"public"', `"${schema}"`)
-        .replaceAll('"legacy_letter_list"', `"${archive}"`);
+        .replaceAll('"legacy_letter_list"', `"${archive}"`)
+        .replaceAll('"workflow_archive"', `"${archive}_workflow"`);
       for (const statement of source.split("--> statement-breakpoint"))
         if (statement.trim()) await tx.unsafe(statement);
     }
@@ -46,6 +50,9 @@ try {
       `bina_session=${raw}.${createHmac("sha256", secret).update(raw).digest("base64url")}`;
     await sql`insert into sessions (user_id, token_hash, expires_at) values (${user.id}, ${createHash("sha256").update(raw).digest("hex")}, ${new Date(Date.now() + 300000)})`;
   }
+  const [initialDepartment] =
+    await sql`INSERT INTO departments(name,manager_user_id) VALUES ('Initial',${ids.BUSINESS_ADMIN}) RETURNING id`;
+  await sql`UPDATE users SET department_id=${initialDepartment.id},profile_completed_at=now() WHERE id IN (${ids.EMPLOYEE},${ids.BUSINESS_ADMIN},${ids.IT_ADMIN})`;
   await cp("public", ".next/standalone/public", { recursive: true });
   await cp(".next/static", ".next/standalone/.next/static", { recursive: true });
   server = spawn(process.execPath, [".next/standalone/server.js"], {
@@ -131,9 +138,9 @@ try {
     assert.equal(html.includes('href="/system/users"'), false);
     assert.ok(html.includes("داشبورد"));
     assert.ok(
-      html.includes(role === "EMPLOYEE" ? "روزهای این هفته" : "کارکنان بدون گزارش ثبت‌شده"),
+      html.includes(role === "EMPLOYEE" ? "روزهای این هفته" : "کارکنان بدون گزارش تأییدشده"),
     );
-    assert.equal(html.includes("کارکنان بدون گزارش ثبت‌شده"), role === "BUSINESS_ADMIN");
+    assert.equal(html.includes("کارکنان بدون گزارش تأییدشده"), role === "BUSINESS_ADMIN");
     for (const path of ["/system/users", "/system/departments", "/system/projects"])
       assert.equal((await request(path, role)).headers.get("location"), "/dashboard");
   }
@@ -149,6 +156,7 @@ try {
     await request("/api/admin/departments", "IT_ADMIN", "POST", {
       name: "واحد مهندسی",
       code: "ENG",
+      managerUserId: ids.BUSINESS_ADMIN,
     }),
     201,
   );
@@ -156,19 +164,26 @@ try {
     await request("/api/admin/projects", "IT_ADMIN", "POST", {
       name: "پروژه آزمایشی",
       code: "P-001",
+      managerUserId: ids.IT_ADMIN,
     }),
     201,
   );
   const file = await data(
-    await request(`/api/admin/projects/${project.id}/files`, "IT_ADMIN", "POST", {
+    await request("/api/admin/reports-master", "IT_ADMIN", "POST", {
       name: "نقشه فرایند",
-      code: "PID-001",
     }),
     201,
   );
-  assert.equal((await request(`/system/projects/${project.id}`, "IT_ADMIN")).status, 200);
+  const projectRedirect = await request(`/system/projects/${project.id}`, "IT_ADMIN");
+  if (projectRedirect.status === 307)
+    assert.equal(projectRedirect.headers.get("location"), "/system/projects");
+  else {
+    assert.equal(projectRedirect.status, 200);
+    assert.match(await projectRedirect.text(), /url=\/system\/projects/);
+  }
+
   // Employee work flow, including simultaneous duplicate saves through real HTTP requests.
-  const reportDate = "2026-01-05";
+  const reportDate = dates.todayInTehran();
   const reportPath = `/api/work-entries/${reportDate}`;
   for (const path of ["/reports", `/reports/${reportDate}`, "/reports/new"]) {
     assert.equal((await request(path)).headers.get("location"), "/login");
@@ -179,7 +194,7 @@ try {
   const emptyDay = await data(await request(reportPath, "EMPLOYEE"));
   const workRows = ["2", "1.5", "3"].map((manHours) => ({
     projectId: project.id,
-    projectFileId: file.id,
+    reportId: file.id,
     description: "بررسی مدرک",
     manHours,
   }));
@@ -195,7 +210,59 @@ try {
   const editorHtml = await (await request(`/reports/${reportDate}`, "EMPLOYEE")).text();
   assert.ok(editorHtml.includes("کپی ردیف"));
   assert.ok(editorHtml.includes("نفر-ساعت ردیف"));
-  const companyQuery = `from=2026-01-03&to=2026-01-09&groupBy=project&groupBySecondary=employee`;
+  const companyQuery = `from=${dates.weekStart(reportDate)}&to=${dates.shiftDate(dates.weekStart(reportDate), 6)}&groupBy=project&groupBySecondary=employee`;
+  // HTTP onboarding cannot be bypassed even with a valid signed session.
+  await sql`UPDATE users SET profile_completed_at=null WHERE id=${ids.EMPLOYEE}`;
+  assert.equal((await request("/dashboard", "EMPLOYEE")).headers.get("location"), "/onboarding");
+  assert.equal((await request(reportPath, "EMPLOYEE")).status, 428);
+  assert.equal(
+    (
+      await request("/api/onboarding", "EMPLOYEE", "POST", {
+        displayName: "کارمند آزمایشی",
+        departmentId: initialDepartment.id,
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await request("/approvals")).headers.get("location"), "/login");
+  assert.equal((await request("/approvals", "BUSINESS_ADMIN")).status, 200);
+  for (const row of savedDay.entries) {
+    const decisionPath = `/api/approvals/${row.id}`;
+    assert.equal(
+      (
+        await request(decisionPath, undefined, "POST", {
+          stage: "DEPARTMENT",
+          decision: "APPROVED",
+        })
+      ).status,
+      401,
+    );
+    assert.equal(
+      (
+        await request(decisionPath, "EMPLOYEE", "POST", {
+          stage: "DEPARTMENT",
+          decision: "APPROVED",
+        })
+      ).status,
+      403,
+    );
+    assert.equal(
+      (await request(decisionPath, "IT_ADMIN", "POST", { stage: "PROJECT", decision: "APPROVED" }))
+        .status,
+      409,
+    );
+    await data(
+      await request(decisionPath, "BUSINESS_ADMIN", "POST", {
+        stage: "DEPARTMENT",
+        decision: "APPROVED",
+      }),
+    );
+    await data(
+      await request(decisionPath, "IT_ADMIN", "POST", { stage: "PROJECT", decision: "APPROVED" }),
+    );
+  }
+  savedDay = await data(await request(reportPath, "EMPLOYEE"));
+  assert.equal((await request("/approvals?view=history", "BUSINESS_ADMIN")).status, 200);
   const exportPath = `/api/admin/reports/export?${companyQuery}&mode=details&page=5&pageSize=25`;
   assert.equal((await request(exportPath)).status, 401);
   assert.equal((await request(exportPath, "EMPLOYEE")).status, 403);
@@ -258,56 +325,44 @@ try {
   );
   const weekData = await data(await request(`/api/work-entries?week=${reportDate}`, "EMPLOYEE"));
   assert.equal(weekData.totalHundredths, 650);
-  const periodPath = "/api/admin/reporting-periods/2026-01-03";
-  assert.equal((await request(`${periodPath}/lock`, undefined, "POST")).status, 401);
-  assert.equal((await request(`${periodPath}/lock`, "EMPLOYEE", "POST")).status, 403);
+  assert.equal(
+    (await request("/api/admin/reporting-periods/2026-01-03/lock", "BUSINESS_ADMIN", "POST"))
+      .status,
+    404,
+  );
   const savedValues = () =>
-    savedDay.entries.map(({ id, projectId, projectFileId, description, manHours }) => ({
+    savedDay.entries.map(({ id, projectId, reportId, description, manHours }) => ({
       id,
       projectId,
-      projectFileId,
+      reportId,
       description,
       manHours,
     }));
-  // Actual simultaneous requests: a save may finish before the lock, never after it bypassing the check.
-  const race = await Promise.all([
-    request(`${periodPath}/lock`, "BUSINESS_ADMIN", "POST"),
-    request(reportPath, "EMPLOYEE", "PUT", { version: savedDay.version, entries: savedValues() }),
-  ]);
-  assert.equal(race[0].status, 200);
-  assert.ok([200, 423].includes(race[1].status));
-  await data(await request(`${periodPath}/lock`, "IT_ADMIN", "POST"));
-  const [lockCount] =
-    await sql`select count(*)::int as count from audit_logs where action='PERIOD_LOCKED'`;
-  assert.equal(lockCount.count, 1);
-  for (const entries of [
-    [],
-    [...savedValues(), workRows[0]],
-    savedValues().map((row) => ({ ...row, manHours: "1" })),
-  ])
-    assert.equal(
-      (await request(reportPath, "EMPLOYEE", "PUT", { version: savedDay.version, entries })).status,
-      423,
-    );
-  const lockedPage = await request(`/reports/${reportDate}`, "EMPLOYEE");
-  assert.equal(lockedPage.status, 200);
-  assert.ok((await lockedPage.text()).includes("توسط مدیریت بسته شده"));
   assert.equal(
-    (await data(await request(`/api/admin/reports?${companyQuery}`, "BUSINESS_ADMIN"))).totalHours,
-    "6.50",
+    (await request(reportPath, "EMPLOYEE", "PUT", { version: savedDay.version, entries: [] }))
+      .status,
+    409,
   );
-  const lockedExport = await request(exportPath, "BUSINESS_ADMIN");
-  assert.equal(lockedExport.status, 200);
   assert.equal(
-    (await readWorkbook(Buffer.from(await lockedExport.arrayBuffer())))[1].data.find(
-      (row) => row[0] === "جمع نفر-ساعت منبع",
-    )[1],
-    6.5,
+    (
+      await request(reportPath, "EMPLOYEE", "PUT", {
+        version: savedDay.version,
+        entries: savedValues().map((r) => ({ ...r, description: "changed" })),
+      })
+    ).status,
+    409,
   );
-  const management = await request(`/admin/reports?${companyQuery}`, "BUSINESS_ADMIN");
-  assert.ok((await management.text()).includes("باز کردن هفته"));
-  const custom = await request("/admin/reports?from=2026-01-04&to=2026-01-05", "BUSINESS_ADMIN");
-  assert.ok(!(await custom.text()).includes("قفل کردن هفته"));
+  const oldDate = dates.shiftDate(dates.weekStart(reportDate), -1);
+  const oldDay = await data(await request(`/api/work-entries/${oldDate}`, "EMPLOYEE"));
+  assert.equal(
+    (
+      await request(`/api/work-entries/${oldDate}`, "EMPLOYEE", "PUT", {
+        version: oldDay.version,
+        entries: workRows,
+      })
+    ).status,
+    423,
+  );
   for (const role of ["EMPLOYEE", "BUSINESS_ADMIN"]) {
     assert.equal((await request("/api/admin/audit", role)).status, 403);
     assert.equal((await request("/system/audit", role)).headers.get("location"), "/dashboard");
@@ -316,20 +371,10 @@ try {
   assert.equal((await request("/system/audit")).headers.get("location"), "/login");
   assert.equal((await request("/system/audit", "IT_ADMIN")).status, 200);
   assert.equal((await request("/api/admin/audit", "IT_ADMIN", "DELETE")).status, 405);
-  const audit = await data(await request("/api/admin/audit?action=PERIOD_LOCKED", "IT_ADMIN"));
-  assert.equal(audit.count, 1);
-  await data(await request(`${periodPath}/unlock`, "IT_ADMIN", "POST"));
-  await data(await request(`${periodPath}/unlock`, "BUSINESS_ADMIN", "POST"));
-  const [unlockCount] =
-    await sql`select count(*)::int as count from audit_logs where action='PERIOD_UNLOCKED'`;
-  assert.equal(unlockCount.count, 1);
-  savedDay = await data(
-    await request(reportPath, "EMPLOYEE", "PUT", {
-      version: savedDay.version,
-      entries: savedValues().map((row) => ({ ...row, description: "اصلاح پس از باز شدن" })),
-    }),
+  const audit = await data(
+    await request("/api/admin/audit?action=DEPARTMENT_APPROVED", "IT_ADMIN"),
   );
-  assert.equal(savedDay.totalHours, "6.50");
+  assert.equal(audit.count, 3);
   const otherDay = await data(await request(reportPath, "BUSINESS_ADMIN"));
   assert.equal(otherDay.entries.length, 0);
   const first = savedDay.entries[0];
@@ -344,19 +389,6 @@ try {
   );
   assert.equal((await request(`${reportPath}?employeeId=${ids.EMPLOYEE}`, "IT_ADMIN")).status, 400);
   assert.equal((await request(reportPath, "EMPLOYEE", "DELETE")).status, 405);
-  const reduced = savedDay.entries
-    .slice(0, 2)
-    .map(({ id, projectId, projectFileId, description, manHours }) => ({
-      id,
-      projectId,
-      projectFileId,
-      description,
-      manHours,
-    }));
-  savedDay = await data(
-    await request(reportPath, "EMPLOYEE", "PUT", { version: savedDay.version, entries: reduced }),
-  );
-  assert.equal(savedDay.entries.length, 2);
   const assigned = await data(
     await request(`/api/admin/users/${ids.EMPLOYEE}`, "IT_ADMIN", "PATCH", {
       role: "BUSINESS_ADMIN",
@@ -366,17 +398,15 @@ try {
   assert.equal(assigned.role, "BUSINESS_ADMIN");
   assert.equal(assigned.departmentId, department.id);
   const off = await data(
-    await request(`/api/admin/projects/${project.id}/files/${file.id}`, "IT_ADMIN", "PATCH", {
+    await request(`/api/admin/reports-master/${file.id}`, "IT_ADMIN", "PATCH", {
       isActive: false,
     }),
   );
   assert.equal(off.isActive, false);
   const historical = await data(await request(reportPath, "EMPLOYEE"));
-  assert.equal(historical.entries[0].fileActive, false);
+  assert.equal(historical.entries[0].reportActive, false);
   assert.equal((await request(`/reports/${reportDate}`, "EMPLOYEE")).status, 200);
-  const options = await data(
-    await request(`/api/work-entry-options?projectId=${project.id}`, "EMPLOYEE"),
-  );
+  const options = await data(await request("/api/work-entry-options?kind=reports", "EMPLOYEE"));
   assert.equal(options.length, 0);
   assert.equal(
     (await request(`/api/admin/projects/${project.id}`, "IT_ADMIN", "DELETE")).status,
@@ -401,6 +431,7 @@ try {
   // Only the random schemas created by this invocation can be removed.
   if (created && /^phase1_http_[a-f0-9]{32}$/.test(schema) && archive === `${schema}_archive`) {
     await root.begin(async (tx) => {
+      await tx.unsafe(`DROP SCHEMA "${archive}_workflow" CASCADE`);
       await tx.unsafe(`DROP SCHEMA "${archive}" CASCADE`);
       await tx.unsafe(`DROP SCHEMA "${schema}" CASCADE`);
     });

@@ -19,7 +19,9 @@
     "admin:promote": "node scripts/bootstrap-admin.mjs",
     "sessions:cleanup": "node scripts/cleanup-sessions.mjs",
     "test:integration": "node --test tests/*.integration.cjs",
-    "test:system": "node scripts/smoke-system.mjs"
+    "test:system": "node scripts/smoke-system.mjs",
+    "seed:sample": "node scripts/seed-department.mjs",
+    "profile:bootstrap": "node scripts/bootstrap-profile.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

@@ -19,7 +19,8 @@ try {
       const source = await readFile(`drizzle/${entry.tag}.sql`, "utf8");
       const isolated = source
         .replaceAll('"public"', `"${scratch}"`)
-        .replaceAll('"legacy_letter_list"', `"${archive}"`);
+        .replaceAll('"legacy_letter_list"', `"${archive}"`)
+        .replaceAll('"workflow_archive"', `"${archive}_workflow"`);
       for (const statement of isolated.split("--> statement-breakpoint")) {
         if (statement.trim()) await tx.unsafe(statement);
       }
@@ -47,12 +48,12 @@ try {
       [
         "audit_logs",
         "departments",
-        "project_files",
         "projects",
-        "reporting_periods",
+        "report_types",
         "sessions",
         "users",
         "work_entries",
+        "work_entry_approvals",
       ],
     );
     // The archive's FK to users remains valid after moving the tables.

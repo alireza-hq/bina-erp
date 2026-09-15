@@ -1,4 +1,5 @@
 "use client";
+import { WORK_STATUSES, statusLabels } from "@/lib/approval-model";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CustomSelect } from "@/components/custom-select";
@@ -19,7 +20,7 @@ function SearchOption({
   projectId,
   departmentId,
 }: {
-  kind: "employee" | "department" | "project" | "projectFile";
+  kind: "employee" | "department" | "project" | "report";
   value?: string;
   onChange: (value: string) => void;
   projectId?: string;
@@ -93,8 +94,8 @@ function SearchOption({
         <small className="admin-help">
           {kind === "employee"
             ? "کاربری برای این واحد / جستجو نیست"
-            : kind === "projectFile"
-              ? "فایلی برای این پروژه / جستجو نیست"
+            : kind === "report"
+              ? "گزارشی مطابق جستجو نیست"
               : "گزینه‌ای پیدا نشد"}
         </small>
       )}
@@ -139,6 +140,18 @@ export function BusinessReportFilters({ query }: { query: BusinessReportQuery })
       <fieldset disabled={pending}>
         <div className="business-filter-grid">
           <div>
+            <label>وضعیت تأیید</label>
+            <CustomSelect
+              ariaLabel="وضعیت تأیید"
+              value={draft.status}
+              onChange={(v) => update({ status: v as BusinessReportQuery["status"] })}
+              options={[
+                { value: "ALL", label: "همه وضعیت‌ها" },
+                ...WORK_STATUSES.map((value) => ({ value, label: statusLabels[value] })),
+              ]}
+            />
+          </div>
+          <div>
             <label>از تاریخ</label>
             <JalaliDatePicker
               value={draft.from}
@@ -178,18 +191,15 @@ export function BusinessReportFilters({ query }: { query: BusinessReportQuery })
             <SearchOption
               kind="project"
               value={draft.projectId}
-              onChange={(projectId) =>
-                update({ projectId: projectId || undefined, projectFileId: undefined })
-              }
+              onChange={(projectId) => update({ projectId: projectId || undefined })}
             />
           </div>
           <div>
-            <label>فایل پروژه</label>
+            <label>گزارش</label>
             <SearchOption
-              kind="projectFile"
-              value={draft.projectFileId}
-              projectId={draft.projectId}
-              onChange={(projectFileId) => update({ projectFileId: projectFileId || undefined })}
+              kind="report"
+              value={draft.reportId}
+              onChange={(reportId) => update({ reportId: reportId || undefined })}
             />
           </div>
           <div>

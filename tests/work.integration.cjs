@@ -1,413 +1,350 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const { randomUUID, randomBytes, createHash, createHmac } = require("node:crypto");
-const postgres = require("postgres");
-const { drizzle } = require("drizzle-orm/postgres-js");
-const { sql, eq } = require("drizzle-orm");
+const { randomUUID } = require("node:crypto");
+const { fixture } = require("./workflow-fixture.cjs");
 const { load } = require("./helpers.cjs");
-require("@next/env").loadEnvConfig(process.cwd());
-
-test("employee reporting on PostgreSQL (isolated transaction rolled back)", async (t) => {
-  const client = postgres(process.env.DATABASE_URL, { max: 1, connect_timeout: 10 });
-  const schema = load("src/db/schema.ts");
-  const root = drizzle(client, { schema });
-  const scratch = `phase2_${randomUUID().replaceAll("-", "")}`,
-    archive = `${scratch}_archive`;
-  const rollback = new Error("fixture rollback"),
-    jar = new Map();
-  process.env.JWT_SECRET = "phase2-test-secret-with-at-least-32-characters";
-  try {
-    await root.transaction(async (tx) => {
-      await tx.execute(sql.raw(`CREATE SCHEMA "${scratch}"`));
-      await tx.execute(sql.raw(`SET LOCAL search_path TO "${scratch}", pg_catalog`));
-      for (const entry of JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")).entries) {
-        const source = readFileSync(`drizzle/${entry.tag}.sql`, "utf8")
-          .replaceAll('"public"', `"${scratch}"`)
-          .replaceAll('"legacy_letter_list"', `"${archive}"`);
-        for (const statement of source.split("--> statement-breakpoint"))
-          if (statement.trim()) await tx.execute(sql.raw(statement));
-      }
-      const ids = {},
-        cookies = {};
-      for (const [name, role] of [
-        ["employee", "EMPLOYEE"],
-        ["other", "EMPLOYEE"],
-        ["business", "BUSINESS_ADMIN"],
-        ["it", "IT_ADMIN"],
-      ]) {
-        const [user] = await tx
-          .insert(schema.users)
-          .values({ ldapId: `CN=${name},DC=test`, username: name, displayName: name, role })
-          .returning();
-        ids[name] = user.id;
-        const raw = randomBytes(32).toString("base64url");
-        cookies[name] =
-          `${raw}.${createHmac("sha256", process.env.JWT_SECRET).update(raw).digest("base64url")}`;
-        await tx.insert(schema.sessions).values({
-          userId: user.id,
-          tokenHash: createHash("sha256").update(raw).digest("hex"),
-          expiresAt: new Date(Date.now() + 3600000),
-        });
-      }
-      const [p1, p2, inactive] = await tx
-        .insert(schema.projects)
-        .values([
-          { name: "Project A", code: "A" },
-          { name: "Project B", code: "B" },
-          { name: "Inactive", code: "OFF", isActive: false },
-        ])
-        .returning();
-      const [f1, f2, f3, offFile, offProjectFile] = await tx
-        .insert(schema.projectFiles)
-        .values([
-          { projectId: p1.id, name: "PID", code: "PID-101" },
-          { projectId: p1.id, name: "MTO", code: "MTO-12" },
-          { projectId: p2.id, name: "Vendor document", code: "VD-77" },
-          { projectId: p1.id, name: "Inactive file", code: "OFF", isActive: false },
-          { projectId: inactive.id, name: "Inactive project file", code: "OFF" },
-        ])
-        .returning();
-      const date = "2026-01-05";
-      const row = (project = p1, file = f1, hours = "2") => ({
-        projectId: project.id,
-        projectFileId: file.id,
-        description: "بررسی نقشه",
-        manHours: hours,
-      });
-      function modules(connection) {
-        const mocks = {
-          "@/db": { db: connection },
-          "@/db/schema": schema,
-          "next/headers": { cookies: async () => ({ get: (key) => jar.get(key) }) },
-        };
-        const auth = load("src/lib/auth.ts", mocks);
-        const service = load("src/lib/work-entries.ts", mocks);
-        const api = load("src/lib/work-api.ts", {
-          ...mocks,
-          "@/lib/auth": auth,
-          "@/lib/work-entries": service,
-        });
-        return { api, service };
-      }
-      async function call(
-        actor,
-        action = "ownDayApi",
-        method = "GET",
-        body,
-        selectedDate = date,
-        query = "",
-      ) {
-        jar.clear();
-        if (actor) jar.set("bina_session", { value: cookies[actor] });
-        const request = new Request(`http://localhost:3000/api/work-entries${query}`, {
-          method,
-          headers: { origin: "http://localhost:3000", "Content-Type": "application/json" },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        });
-        try {
-          return await tx.transaction(async (save) => {
-            const response = await modules(save).api[action](request, selectedDate);
-            if (response.status >= 400) throw { response };
-            return response;
-          });
-        } catch (error) {
-          if (error.response) return error.response;
-          throw error;
-        }
-      }
-      async function data(response, status = 200) {
-        const result = await response.json();
-        assert.equal(response.status, status, JSON.stringify(result));
-        return result.data;
-      }
-      const read = (actor = "employee", selectedDate = date) =>
-        call(actor, "ownDayApi", "GET", undefined, selectedDate).then(data);
-      const save = (actor, day, entries) =>
-        call(actor, "ownDayApi", "PUT", { version: day.version, entries }, day.date);
-      const values = (day) =>
-        day.entries.map(({ id, projectId, projectFileId, description, manHours }) => ({
-          id,
-          projectId,
-          projectFileId,
-          description,
-          manHours,
-        }));
-      let day, other;
-      await t.test("authentication, exact schema types and relational indexes", async () => {
-        for (const action of ["ownDayApi", "ownWeekApi", "workOptionsApi"])
-          assert.equal((await call(null, action)).status, 401);
-        assert.equal((await call(null, "ownDayApi", "PUT", {})).status, 401);
-        const columns = await tx.execute(
-          sql`select column_name,data_type,numeric_precision,numeric_scale from information_schema.columns where table_schema=${scratch} and table_name='work_entries'`,
-        );
-        assert.equal(columns.find((c) => c.column_name === "work_date").data_type, "date");
-        assert.equal(columns.find((c) => c.column_name === "man_hours").numeric_scale, 2);
-        assert.equal(columns.find((c) => c.column_name === "man_hours").numeric_precision, 5);
-        const indexes = await tx.execute(
-          sql`select indexname from pg_indexes where schemaname=${scratch} and tablename='work_entries'`,
-        );
-        assert.ok(indexes.some((i) => i.indexname === "work_entries_employee_date_idx"));
-        assert.ok(indexes.some((i) => i.indexname === "work_entries_project_date_idx"));
-      });
-      await t.test(
-        "multiple rows save atomically with decimal-safe daily and own weekly totals",
-        async () => {
-          const empty = await read();
-          day = await data(
-            await save("employee", empty, [row(p1, f1, "2"), row(p1, f2, "1.5"), row(p2, f3, "3")]),
-          );
-          assert.equal(day.entries.length, 3);
-          assert.equal(day.totalHours, "6.50");
-          assert.equal(day.highTotal, false);
-          assert.ok(day.entries.some((entry) => entry.manHours === "1.50"));
-          const week = await data(
-            await call("employee", "ownWeekApi", "GET", undefined, date, `?week=${date}`),
-          );
-          assert.equal(week.totalHundredths, 650);
-          assert.equal(week.count, 3);
-          assert.equal(
-            (await save("employee", empty, [row()])).status,
-            409,
-            "duplicate submission is stale",
-          );
-          other = await data(await save("other", await read("other"), [row(p1, f1, "8")]));
-          assert.equal((await read()).entries.length, 3);
-          for (const role of ["business", "it"])
-            assert.equal(
-              (await read(role)).entries.length,
-              0,
-              "admins have no cross-employee override",
-            );
-        },
-      );
-      await t.test(
-        "ownership: reject foreign row IDs and client employeeId; deletion only affects the caller",
-        async () => {
-          const foreign = values(other)[0];
-          assert.equal((await save("employee", day, [foreign])).status, 404);
-          assert.equal(
-            (
-              await call("employee", "ownDayApi", "PUT", {
-                version: day.version,
-                entries: [],
-                employeeId: ids.other,
-              })
-            ).status,
-            400,
-          );
-          assert.equal(
-            (
-              await call("employee", "ownDayApi", "PUT", {
-                version: day.version,
-                entries: [{ ...row(), employeeId: ids.other }],
-              })
-            ).status,
-            400,
-          );
-          for (const action of ["ownDayApi", "ownWeekApi"])
-            assert.equal(
-              (await call("employee", action, "GET", undefined, date, `?employeeId=${ids.other}`))
-                .status,
-              400,
-            );
-          const differentDay = await read("employee", "2026-01-06");
-          assert.equal(
-            (await save("employee", differentDay, values(day))).status,
-            404,
-            "same user's ID from another date cannot be moved",
-          );
-          assert.equal((await read("other")).version, other.version);
-        },
-      );
-      await t.test(
-        "validation rejects invalid/inactive relationships, descriptions, hours and unbounded bodies without partial writes",
-        async () => {
-          const invalidRows = [
-            { ...row(), projectId: randomUUID() },
-            { ...row(), projectFileId: randomUUID() },
-            row(p1, f3),
-            row(inactive, offProjectFile),
-            row(p1, offFile),
-            { ...row(), description: " " },
-            { ...row(), description: "x".repeat(2001) },
-            { ...row(), manHours: "0" },
-            { ...row(), manHours: "-1" },
-            { ...row(), manHours: "1.001" },
-            { ...row(), manHours: "24.01" },
-          ];
-          for (const bad of invalidRows) {
-            const response = await save("employee", day, [...values(day), row(p1, f1, "0.5"), bad]);
-            assert.equal(response.status, 400);
-            assert.equal(
-              (await read()).version,
-              day.version,
-              "failure did not add/delete/update rows",
-            );
-          }
-          assert.equal(
-            (await save("employee", day, Array(51).fill(row(p1, f1, "0.01")))).status,
-            400,
-          );
-          assert.equal((await save("employee", day, [values(day)[0], values(day)[0]])).status, 400);
-          assert.equal(
-            (
-              await call("employee", "ownDayApi", "PUT", {
-                version: day.version,
-                entries: [{ ...row(), description: "x".repeat(524289) }],
-              })
-            ).status,
-            413,
-          );
-          assert.equal(
-            (
-              await call(
-                "employee",
-                "ownDayApi",
-                "PUT",
-                { version: day.version, entries: [row()] },
-                "2026-02-30",
-              )
-            ).status,
-            400,
-          );
-          assert.equal(
-            (
-              await call(
-                "employee",
-                "ownDayApi",
-                "PUT",
-                { version: day.version, entries: [row()] },
-                "2099-12-31",
-              )
-            ).status,
-            400,
-          );
-          assert.equal((await read()).version, day.version);
-        },
-      );
-      await t.test(
-        "edit set updates/adds/removes safely, preserves IDs, and rejects stale or excessive totals",
-        async () => {
-          const before = day;
-          const retained = values(day).slice(0, 2);
-          day = await data(
-            await save("employee", day, [
-              { ...retained[0], description: "اصلاح نقشه", manHours: "4.25" },
-              retained[1],
-              row(p1, f2, "0.25"),
-            ]),
-          );
-          assert.equal(day.entries.length, 3);
-          assert.ok(day.entries.some((e) => e.id === retained[0].id));
-          assert.ok(day.entries.some((e) => e.id === retained[1].id));
-          assert.equal(
-            day.entries.some((e) => e.id === before.entries[2].id),
-            false,
-          );
-          assert.equal((await save("employee", before, values(before))).status, 409);
-          day = await data(await save("employee", day, [{ ...values(day)[0], manHours: "13.5" }]));
-          assert.equal(day.totalHours, "13.50");
-          assert.equal(day.highTotal, true);
-          assert.equal(
-            (await save("employee", day, [row(p1, f1, "13"), row(p1, f2, "12")])).status,
-            400,
-          );
-        },
-      );
-      await t.test(
-        "historical inactive references remain readable/editable; new use is rejected; foreign keys retain history",
-        async () => {
-          // Use a known active pair before deactivation.
-          day = await data(await save("employee", day, [row(p1, f1, "1.5")]));
-          await tx
-            .update(schema.projects)
-            .set({ isActive: false })
-            .where(eq(schema.projects.id, p1.id));
-          await tx
-            .update(schema.projectFiles)
-            .set({ isActive: false })
-            .where(eq(schema.projectFiles.id, f1.id));
-          const historical = await read();
-          assert.equal(historical.entries[0].projectName, "Project A");
-          assert.equal(historical.entries[0].projectActive, false);
-          assert.equal(historical.entries[0].fileActive, false);
-          day = await data(
-            await save("employee", historical, [
-              { ...values(historical)[0], description: "تصحیح سابقه", manHours: "1.25" },
-            ]),
-          );
-          assert.equal(day.totalHours, "1.25");
-          assert.equal(
-            (await save("employee", day, [...values(day), row(p1, f1, "1")])).status,
-            400,
-          );
-          const available = await data(
-            await call("employee", "workOptionsApi", "GET", undefined, date, `?projectId=${p1.id}`),
-          );
-          assert.equal(available.length, 0);
-          const expectCode = (code) => (error) => error.code === code || error.cause?.code === code;
-          await assert.rejects(
-            tx.transaction((nested) =>
-              nested
-                .insert(schema.workEntries)
-                .values({ ...row(p2, f1, "1"), employeeId: ids.employee, workDate: date }),
-            ),
-            expectCode("23503"),
-          );
-          await assert.rejects(
-            tx.transaction((nested) =>
-              nested
-                .insert(schema.workEntries)
-                .values({ ...row(p2, f3, "0"), employeeId: ids.employee, workDate: date }),
-            ),
-            expectCode("23514"),
-          );
-          await assert.rejects(
-            tx.transaction((nested) =>
-              nested.delete(schema.projectFiles).where(eq(schema.projectFiles.id, f1.id)),
-            ),
-            expectCode("23503"),
-          );
-          await assert.rejects(
-            tx.transaction((nested) =>
-              nested.delete(schema.users).where(eq(schema.users.id, ids.employee)),
-            ),
-            expectCode("23503"),
-          );
-        },
-      );
-      await t.test(
-        "inactive users are denied and clearing one's date does not delete another user's records",
-        async () => {
-          await tx
-            .update(schema.users)
-            .set({ isActive: false })
-            .where(eq(schema.users.id, ids.employee));
-          assert.equal((await call("employee")).status, 401);
-          assert.equal((await save("employee", day, [])).status, 401);
-          await assert.rejects(
-            modules(tx).service.updateOwnDailyEntries(ids.employee, date, {
-              version: day.version,
-              entries: [],
-            }),
-            /غیرفعال/,
-          );
-          await tx
-            .update(schema.users)
-            .set({ isActive: true })
-            .where(eq(schema.users.id, ids.employee));
-          day = await data(await save("employee", day, []));
-          assert.equal(day.totalHours, "0.00");
-          assert.equal(day.entries.length, 0);
-          assert.equal((await read("other")).entries[0].id, other.entries[0].id);
-        },
-      );
-      throw rollback;
+test("employee workflow, ownership, profile and two-stage decisions on PostgreSQL", async (t) => {
+  const f = await fixture();
+  const { people: p, client: sql, department: d, project, report } = f;
+  const work = f.mod("work-entries"),
+    approvals = f.mod("approvals"),
+    profile = f.mod("onboarding"),
+    auth = f.mod("auth");
+  const day = () => work.getOwnWorkEntriesForDate(p.employee.id, f.date);
+  const save = async (rows) => {
+    const current = await day();
+    return work.updateOwnDailyEntries(p.employee.id, f.date, {
+      version: current.version,
+      entries: rows,
     });
-  } catch (error) {
-    if (error !== rollback) throw error;
+  };
+  const input = (row) => ({
+    id: row.id,
+    projectId: row.projectId,
+    reportId: row.reportId,
+    manHours: row.manHours,
+    description: row.description,
+  });
+  const request = (method = "GET", body) =>
+    new Request("http://localhost:3000/api/approvals", {
+      method,
+      headers: { origin: "http://localhost:3000", "Content-Type": "application/json" },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+  try {
+    await t.test(
+      "new users cannot bypass onboarding; inactive/unmanaged departments rejected; Persian profile is local",
+      async () => {
+        f.signIn();
+        assert.equal((await auth.requireApiRole(request(), "EMPLOYEE")).error.status, 401);
+        f.signIn("it");
+        await sql`UPDATE users SET department_id=${d.id} WHERE id=${p.new.id}`;
+        const roleOnly = await f
+          .mod("admin-api")
+          .updateUser(request("PATCH", { role: "EMPLOYEE" }), p.new.id);
+        assert.equal(roleOnly.status, 200);
+        assert.equal(
+          (await sql`SELECT profile_completed_at FROM users WHERE id=${p.new.id}`)[0]
+            .profile_completed_at,
+          null,
+        );
+        f.signIn("new");
+        await assert.rejects(auth.requireUser(), /onboarding/);
+        assert.equal((await auth.requireApiRole(request(), "EMPLOYEE")).error.status, 428);
+        await assert.rejects(
+          profile.completeProfile(p.new.id, { displayName: " ", departmentId: d.id }),
+        );
+        await assert.rejects(profile.completeProfile(p.new.id, { displayName: "علی رضایی" }));
+        await sql`UPDATE departments SET is_active=false WHERE id=${d.id}`;
+        await assert.rejects(
+          profile.completeProfile(p.new.id, { displayName: "علی رضایی", departmentId: d.id }),
+        );
+        await sql`UPDATE departments SET is_active=true WHERE id=${d.id}`;
+        await profile.completeProfile(p.new.id, { displayName: " علی رضایی ", departmentId: d.id });
+        assert.equal((await auth.requireUser()).displayName, "علی رضایی");
+        const synced = await auth.syncDirectoryUser({
+          ldapId: p.new.ldapId,
+          username: p.new.username,
+          displayName: "LDAP English Name",
+        });
+        assert.equal(synced.displayName, "علی رضایی");
+        await assert.rejects(
+          profile.completeProfile(p.new.id, { displayName: "نام دیگر", departmentId: d.id }),
+          (e) => e.status === 409,
+        );
+      },
+    );
+    await t.test(
+      "invalid relationships, inactive values, missing managers and oversized payloads reject atomically",
+      async () => {
+        for (const row of [
+          f.row({ projectId: randomUUID() }),
+          f.row({ reportId: randomUUID() }),
+          f.row({ manHours: "0" }),
+          f.row({ manHours: "-1" }),
+          f.row({ description: "a".repeat(2001) }),
+        ])
+          await assert.rejects(save([f.row(), row]));
+        assert.equal((await day()).entries.length, 0);
+        for (const table of ["projects", "report_types"]) {
+          const id = table === "projects" ? project.id : report.id;
+          await sql.unsafe(`UPDATE ${table} SET is_active=false WHERE id=$1`, [id]);
+          await assert.rejects(save([f.row()]));
+          await sql.unsafe(`UPDATE ${table} SET is_active=true WHERE id=$1`, [id]);
+        }
+        await sql`UPDATE departments SET manager_user_id=null WHERE id=${d.id}`;
+        await assert.rejects(save([f.row()]));
+        await sql`UPDATE departments SET manager_user_id=${p.dm.id} WHERE id=${d.id}`;
+        await sql`UPDATE projects SET manager_user_id=null WHERE id=${project.id}`;
+        await assert.rejects(save([f.row()]));
+        await sql`UPDATE projects SET manager_user_id=${p.pm.id} WHERE id=${project.id}`;
+        await assert.rejects(save(Array.from({ length: 51 }, () => f.row({ manHours: "0.01" }))));
+        const empty = await day();
+        await assert.rejects(
+          work.updateOwnDailyEntries(p.employee.id, f.date, {
+            version: empty.version,
+            employeeId: p.other.id,
+            entries: [f.row()],
+          }),
+        );
+      },
+    );
+    let entries;
+    await t.test(
+      "atomic multi-row submit, exact total, no impersonation/read/update/delete IDOR",
+      async () => {
+        const saved = await save([f.row({ manHours: "0.25" }), f.row({ manHours: "1.5" })]);
+        entries = saved.entries;
+        assert.equal(saved.totalHours, "1.75");
+        assert.ok(entries.every((e) => e.status === "PENDING_DEPARTMENT_APPROVAL"));
+        assert.equal((await work.getOwnWorkEntriesForDate(p.other.id, f.date)).entries.length, 0);
+        const other = await work.getOwnWorkEntriesForDate(p.other.id, f.date);
+        await assert.rejects(
+          work.updateOwnDailyEntries(p.other.id, f.date, {
+            version: other.version,
+            entries: [input(entries[0])],
+          }),
+          (e) => e.status === 404,
+        );
+        await assert.rejects(save([]), (e) => e.status === 409);
+        await assert.rejects(
+          save(entries.map((e, i) => input({ ...e, description: i ? e.description : "tampered" }))),
+          (e) => e.status === 409,
+        );
+        assert.equal(
+          (
+            await sql`SELECT count(*)::int AS n FROM audit_logs WHERE action='WORK_ENTRY_SUBMITTED'`
+          )[0].n,
+          2,
+        );
+      },
+    );
+    await t.test(
+      "relationship authorization: business/IT roles do not grant approval rights; sequential approvals",
+      async () => {
+        const id = entries[0].id;
+        assert.equal((await approvals.getApprovals(p.dm.id, {})).count, 2);
+        assert.equal((await approvals.getApprovals(p.pm.id, {})).count, 0);
+        assert.equal((await approvals.getApprovals(p.it.id, {})).count, 0);
+        await assert.rejects(
+          approvals.decideWorkEntry(p.it.id, id, { stage: "DEPARTMENT", decision: "APPROVED" }),
+          (e) => e.status === 403,
+        );
+        await assert.rejects(
+          approvals.decideWorkEntry(p.pm.id, id, { stage: "PROJECT", decision: "APPROVED" }),
+          (e) => e.status === 409,
+        );
+        await approvals.decideWorkEntry(p.dm.id, id, { stage: "DEPARTMENT", decision: "APPROVED" });
+        assert.equal((await approvals.getApprovals(p.pm.id, {})).count, 1);
+        await assert.rejects(
+          approvals.decideWorkEntry(p.dm.id, id, { stage: "PROJECT", decision: "APPROVED" }),
+          (e) => e.status === 403,
+        );
+        await approvals.decideWorkEntry(p.pm.id, id, { stage: "PROJECT", decision: "APPROVED" });
+        assert.equal((await day()).entries.find((e) => e.id === id).status, "APPROVED");
+        await assert.rejects(
+          save((await day()).entries.map((e) => input({ ...e, description: "tampered" }))),
+          (e) => e.status === 409,
+        );
+      },
+    );
+    await t.test(
+      "department/project rejection, mandatory reason, resubmit preserves decision snapshots",
+      async () => {
+        const id = entries[1].id;
+        await assert.rejects(
+          approvals.decideWorkEntry(p.dm.id, id, { stage: "DEPARTMENT", decision: "REJECTED" }),
+        );
+        await approvals.decideWorkEntry(p.dm.id, id, {
+          stage: "DEPARTMENT",
+          decision: "REJECTED",
+          rejectionReason: "اصلاح ساعت",
+        });
+        const current = await day();
+        assert.equal(
+          current.history.find((h) => h.workEntryId === id).rejectionReason,
+          "اصلاح ساعت",
+        );
+        await save(
+          current.entries.map((e) =>
+            input(e.id === id ? { ...e, manHours: "2", description: "اصلاح" } : e),
+          ),
+        );
+        await approvals.decideWorkEntry(p.dm.id, id, { stage: "DEPARTMENT", decision: "APPROVED" });
+        await approvals.decideWorkEntry(p.pm.id, id, {
+          stage: "PROJECT",
+          decision: "REJECTED",
+          rejectionReason: "اصلاح گزارش",
+        });
+        assert.equal(
+          (
+            await sql`SELECT count(*)::int AS n FROM work_entry_approvals WHERE work_entry_id=${id}`
+          )[0].n,
+          3,
+        );
+        const history = await approvals.getApprovals(p.dm.id, { view: "history" });
+        assert.equal(
+          history.rows.find((r) => r.reason === "اصلاح ساعت").manHours,
+          entries[1].manHours,
+        );
+        assert.equal(
+          (
+            await sql`SELECT count(*)::int AS n FROM audit_logs WHERE action='WORK_ENTRY_RESUBMITTED'`
+          )[0].n,
+          1,
+        );
+      },
+    );
+    await t.test(
+      "same manager and explicit self-approval require two actions; current assignment routes pending work",
+      async () => {
+        await sql`UPDATE projects SET manager_user_id=${p.dm.id} WHERE id=${project.id}`;
+        const current = await day();
+        await save(current.entries.map(input));
+        const id = entries[1].id;
+        await approvals.decideWorkEntry(p.dm.id, id, { stage: "DEPARTMENT", decision: "APPROVED" });
+        assert.equal(
+          (await day()).entries.find((e) => e.id === id).status,
+          "PENDING_PROJECT_APPROVAL",
+        );
+        await sql`UPDATE projects SET manager_user_id=${p.pm.id} WHERE id=${project.id}`;
+        await assert.rejects(
+          approvals.decideWorkEntry(p.dm.id, id, { stage: "PROJECT", decision: "APPROVED" }),
+          (e) => e.status === 403,
+        );
+        await approvals.decideWorkEntry(p.pm.id, id, { stage: "PROJECT", decision: "APPROVED" });
+        const own = await work.getOwnWorkEntriesForDate(p.dm.id, f.date);
+        const submitted = await work.updateOwnDailyEntries(p.dm.id, f.date, {
+          version: own.version,
+          entries: [f.row()],
+        });
+        await approvals.decideWorkEntry(p.dm.id, submitted.entries[0].id, {
+          stage: "DEPARTMENT",
+          decision: "APPROVED",
+        });
+        assert.equal(
+          (await work.getOwnWorkEntriesForDate(p.dm.id, f.date)).entries[0].status,
+          "PENDING_PROJECT_APPROVAL",
+        );
+        await sql`UPDATE projects SET manager_user_id=${p.dm.id} WHERE id=${project.id}`;
+        await approvals.decideWorkEntry(p.dm.id, submitted.entries[0].id, {
+          stage: "PROJECT",
+          decision: "APPROVED",
+        });
+        assert.equal(
+          (await work.getOwnWorkEntriesForDate(p.dm.id, f.date)).entries[0].status,
+          "APPROVED",
+        );
+        assert.equal(
+          (
+            await sql`SELECT count(*)::int AS n FROM work_entry_approvals WHERE work_entry_id=${submitted.entries[0].id} AND manager_user_id=${p.dm.id}`
+          )[0].n,
+          2,
+        );
+        await sql`UPDATE projects SET manager_user_id=${p.pm.id} WHERE id=${project.id}`;
+      },
+    );
+    await t.test(
+      "approval transactions serialize concurrent tabs and reject duplicates",
+      async () => {
+        const own = await work.getOwnWorkEntriesForDate(p.other.id, f.date);
+        const saved = await work.updateOwnDailyEntries(p.other.id, f.date, {
+          version: own.version,
+          entries: [f.row()],
+        });
+        const results = await Promise.allSettled(
+          [1, 2].map(() =>
+            approvals.decideWorkEntry(p.dm.id, saved.entries[0].id, {
+              stage: "DEPARTMENT",
+              decision: "APPROVED",
+            }),
+          ),
+        );
+        assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+        assert.equal(
+          (
+            await sql`SELECT count(*)::int AS n FROM work_entry_approvals WHERE work_entry_id=${saved.entries[0].id}`
+          )[0].n,
+          1,
+        );
+      },
+    );
+    await t.test("audit failure rolls back business and approval history together", async () => {
+      const before = (await sql`SELECT count(*)::int AS n FROM work_entry_approvals`)[0].n;
+      await sql.unsafe(
+        `CREATE FUNCTION fail_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture failure'; END $$`,
+      );
+      await sql.unsafe(
+        `CREATE TRIGGER audit_fixture BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION fail_audit()`,
+      );
+      try {
+        const [pending] =
+          await sql`SELECT id FROM work_entries WHERE status='PENDING_PROJECT_APPROVAL' LIMIT 1`;
+        await assert.rejects(
+          approvals.decideWorkEntry(p.pm.id, pending.id, {
+            stage: "PROJECT",
+            decision: "APPROVED",
+          }),
+        );
+        assert.equal(
+          (await sql`SELECT status FROM work_entries WHERE id=${pending.id}`)[0].status,
+          "PENDING_PROJECT_APPROVAL",
+        );
+        assert.equal((await sql`SELECT count(*)::int AS n FROM work_entry_approvals`)[0].n, before);
+        const old = await day();
+        await assert.rejects(save([...old.entries.map(input), f.row()]));
+        assert.equal((await day()).entries.length, old.entries.length);
+      } finally {
+        await sql.unsafe(`DROP TRIGGER audit_fixture ON audit_logs`);
+        await sql.unsafe(`DROP FUNCTION fail_audit()`);
+      }
+    });
+    await t.test(
+      "automatic old-week read-only leaves historical manager approvals and exports available",
+      async () => {
+        f.setToday("2026-09-19");
+        assert.equal((await day()).period.status, "LOCKED");
+        await assert.rejects(save((await day()).entries.map(input)), (e) => e.status === 423);
+        const [pending] =
+          await sql`SELECT id FROM work_entries WHERE status='PENDING_PROJECT_APPROVAL' LIMIT 1`;
+        await approvals.decideWorkEntry(p.pm.id, pending.id, {
+          stage: "PROJECT",
+          decision: "APPROVED",
+        });
+        const service = f.mod("business-reports"),
+          parse = load("src/lib/business-report-query.ts").parseBusinessReportQuery;
+        const q = parse({ from: "2026-09-12", to: "2026-09-18" });
+        const result = await service.getBusinessReport(q);
+        const exported = await service.getBusinessReportExport(q, "details");
+        assert.equal(result.totalHours, exported.totalHours);
+        assert.ok(result.entryCount > 0);
+        await sql`UPDATE projects SET is_active=false WHERE id=${project.id}`;
+        await sql`UPDATE report_types SET is_active=false WHERE id=${report.id}`;
+        assert.equal((await service.getBusinessReport(q)).totalHours, result.totalHours);
+        assert.equal((await day()).entries.length, 2);
+      },
+    );
   } finally {
-    await client.end();
+    await f.close();
   }
 });

@@ -12,7 +12,11 @@ export async function getEmployeeDashboard() {
   const user = await requireUser();
   const today = todayInTehran();
   const week = await getOwnWorkWeek(user.id, today);
+  const statuses = await db.execute<{ status: string; count: number; hours: string }>(
+    sql`SELECT ${workEntries.status} AS status,count(*)::int AS count,sum(${workEntries.manHours})::text AS hours FROM ${workEntries} WHERE ${workEntries.employeeId}=${user.id}::uuid AND ${workEntries.workDate}>=${week.start}::date AND ${workEntries.workDate}<=${shiftDate(week.start, 6)}::date GROUP BY ${workEntries.status}`,
+  );
   return {
+    statuses: Array.from(statuses),
     today,
     week,
     todayReport: week.days.find((day) => day.date === today)!,
@@ -30,9 +34,9 @@ export async function getBusinessDashboard() {
       // Reuse the reporting engine, including its exact totals and current-department semantics.
       const report = await getBusinessReport({ ...query, groupBy: "project" }, tx);
       const departments = await getBusinessReport({ ...query, groupBy: "department" }, tx);
-      const range = sql`${workEntries.workDate} >= ${from}::date AND ${workEntries.workDate} <= ${to}::date`;
+      const range = sql`${workEntries.status} = 'APPROVED' AND ${workEntries.workDate} >= ${from}::date AND ${workEntries.workDate} <= ${to}::date`;
       // Expected reporters are active EMPLOYEE accounts, regardless of department assignment.
-      const missing = sql`${users.isActive} AND ${users.role} = 'EMPLOYEE' AND NOT EXISTS (SELECT 1 FROM ${workEntries} WHERE ${workEntries.employeeId} = ${users.id} AND ${range})`;
+      const missing = sql`${users.isActive} AND ${users.profileCompletedAt} IS NOT NULL AND ${users.role} = 'EMPLOYEE' AND NOT EXISTS (SELECT 1 FROM ${workEntries} WHERE ${workEntries.employeeId} = ${users.id} AND ${range})`;
       const [counts] = await tx.execute<{
         reporters: number;
         missing: number;

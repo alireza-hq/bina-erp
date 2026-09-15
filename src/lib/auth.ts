@@ -51,8 +51,6 @@ export async function syncDirectoryUser(directoryUser: DirectoryUser) {
       .set({
         ldapId: directoryUser.ldapId,
         username: directoryUser.username,
-        displayName: directoryUser.displayName,
-        email: directoryUser.email,
         updatedAt: new Date(),
       })
       .where(eq(users.id, existing.id))
@@ -118,6 +116,8 @@ export async function getCurrentUser(): Promise<AppUser | null> {
 export async function requireUser() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (!user.profileCompletedAt || !user.departmentId || !user.displayName.trim())
+    redirect("/onboarding");
   return user;
 }
 export async function requireRole(...roles: [AppRole, ...AppRole[]]) {
@@ -136,6 +136,8 @@ export async function requireApiRole(request: Request, ...roles: [AppRole, ...Ap
     return { error: jsonError("سرویس موقتاً در دسترس نیست. دوباره تلاش کنید.", 503) } as const;
   }
   if (!user) return { error: jsonError("ابتدا وارد سامانه شوید", 401) } as const;
+  if (!user.profileCompletedAt || !user.departmentId || !user.displayName.trim())
+    return { error: jsonError("ابتدا مشخصات خود را تکمیل کنید", 428) } as const;
   if (!roles.includes(user.role)) return { error: jsonError("دسترسی کافی ندارید", 403) } as const;
   return { user } as const;
 }

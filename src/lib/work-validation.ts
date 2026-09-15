@@ -18,12 +18,12 @@ export const writableDateSchema = reportDateSchema.refine(
 export const workRowSchema = z.strictObject({
   id: idSchema.optional(),
   projectId: idSchema,
-  projectFileId: idSchema,
+  reportId: idSchema,
   description: z
     .string()
     .trim()
-    .min(1, "شرح فعالیت الزامی است")
-    .max(WORK_LIMITS.descriptionLength, "شرح فعالیت بیش از حد طولانی است"),
+    .max(WORK_LIMITS.descriptionLength, "توضیحات بیش از حد طولانی است")
+    .default(""),
   manHours: z
     .string()
     .max(16)

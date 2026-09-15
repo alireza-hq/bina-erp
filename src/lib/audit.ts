@@ -17,11 +17,21 @@ export async function recordAudit(
 }
 // Explicit projections prevent credentials/directory/session data entering the trail.
 const fields = {
-  USER: ["username", "displayName", "role", "departmentId", "isActive", "employeeCode"],
-  DEPARTMENT: ["name", "code", "isActive"],
-  PROJECT: ["name", "code", "description", "isActive"],
+  USER: ["username", "displayName", "role", "departmentId", "isActive", "profileCompletedAt"],
+  DEPARTMENT: ["name", "code", "isActive", "managerUserId"],
+  PROJECT: ["name", "code", "description", "isActive", "managerUserId"],
+  REPORT: ["name", "description", "isActive"],
   PROJECT_FILE: ["projectId", "name", "code", "description", "isActive"],
-  WORK_ENTRY: ["employeeId", "workDate", "projectId", "projectFileId", "description", "manHours"],
+  WORK_ENTRY: [
+    "employeeId",
+    "workDate",
+    "projectId",
+    "reportId",
+    "description",
+    "manHours",
+    "status",
+    "departmentId",
+  ],
   PERIOD: ["weekStart", "weekEnd", "status", "lockedAt", "lockedBy"],
 } as const;
 export function auditData(entity: AuditEntity, row: object) {
@@ -33,7 +43,7 @@ export function auditData(entity: AuditEntity, row: object) {
 export async function auditMasterChange(
   tx: Transaction,
   actorId: string,
-  entity: "USER" | "DEPARTMENT" | "PROJECT" | "PROJECT_FILE",
+  entity: "USER" | "DEPARTMENT" | "PROJECT" | "REPORT",
   id: string,
   before: object | null,
   after: object,
@@ -54,9 +64,12 @@ export async function auditMasterChange(
   if (entity === "USER") {
     if (changed.includes("role")) actions.push("USER_ROLE_CHANGED");
     if (changed.includes("departmentId")) actions.push("USER_DEPARTMENT_CHANGED");
-    if (changed.includes("employeeCode")) actions.push("USER_UPDATED");
+    if (changed.includes("displayName") || changed.includes("profileCompletedAt"))
+      actions.push("USER_UPDATED");
   } else if (changed.some((key) => key !== "isActive"))
     actions.push(`${entity}_UPDATED` as AuditAction);
+  if ((entity === "DEPARTMENT" || entity === "PROJECT") && changed.includes("managerUserId"))
+    actions.push(`${entity}_MANAGER_CHANGED`);
   for (const action of actions)
     await recordAudit(tx, actorId, action, entity, id, oldData, newData);
 }

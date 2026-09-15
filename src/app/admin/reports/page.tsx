@@ -1,3 +1,4 @@
+import { statusLabels } from "@/lib/approval-model";
 import Link from "next/link";
 import { ZodError } from "zod";
 import { requireRole } from "@/lib/auth";
@@ -118,7 +119,7 @@ export default async function Page({ searchParams }: PageProps<"/admin/reports">
       </p>
       <BusinessReportFilters key={JSON.stringify(query)} query={query} />
       <nav className="filter-chips" aria-label="فیلترهای اعمال‌شده">
-        {(["employee", "department", "project", "projectFile"] as const).map((kind) => {
+        {(["employee", "department", "project", "report"] as const).map((kind) => {
           const key = `${kind}Id` as const;
           if (!query[key]) return null;
           return (
@@ -143,12 +144,13 @@ export default async function Page({ searchParams }: PageProps<"/admin/reports">
       {period ? (
         <PeriodControl key={JSON.stringify(period)} initial={period} />
       ) : (
-        <p className="admin-help">
-          مدیریت قفل فقط برای یک هفته کامل شنبه تا جمعه فعال است؛ یک هفته را انتخاب کنید.
-        </p>
+        <p className="admin-help">ویرایش کارکنان فقط در هفته جاری و مطابق وضعیت تأیید مجاز است.</p>
       )}
       <section className="admin-surface">
         <div className="report-summary">
+          <span>
+            وضعیت: {query.status === "ALL" ? "همه وضعیت‌ها (غیررسمی)" : statusLabels[query.status]}
+          </span>
           <strong>جمع کل فیلترشده: {hours(result.totalHours)} نفر-ساعت</strong>
           <span>{toPersianDigits(result.entryCount)} ردیف</span>
         </div>
@@ -218,9 +220,10 @@ export default async function Page({ searchParams }: PageProps<"/admin/reports">
                     "کارمند",
                     "واحد فعلی",
                     "پروژه",
-                    "فایل پروژه",
-                    "شرح فعالیت",
+                    "گزارش",
+                    "توضیحات / ملاحظات",
                     "نفر-ساعت",
+                    "وضعیت تأیید",
                   ].map((label) => (
                     <th key={label}>{label}</th>
                   ))}
@@ -238,10 +241,11 @@ export default async function Page({ searchParams }: PageProps<"/admin/reports">
                       <bdi>{row.project}</bdi>
                     </td>
                     <td>
-                      <bdi>{row.projectFile}</bdi>
+                      <bdi>{row.report}</bdi>
                     </td>
                     <td className="report-description">{row.description}</td>
                     <td className="numeric">{hours(row.manHours)}</td>
+                    <td>{statusLabels[row.status]}</td>
                   </tr>
                 ))}
               </tbody>

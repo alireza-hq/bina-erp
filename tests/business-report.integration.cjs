@@ -23,7 +23,8 @@ test("business reporting PostgreSQL: isolated relational and authorization check
       for (const entry of JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")).entries) {
         const source = readFileSync(`drizzle/${entry.tag}.sql`, "utf8")
           .replaceAll('"public"', `"${scratch}"`)
-          .replaceAll('"legacy_letter_list"', `"${archive}"`);
+          .replaceAll('"legacy_letter_list"', `"${archive}"`)
+          .replaceAll('"workflow_archive"', `"${archive}_workflow"`);
         for (const statement of source.split("--> statement-breakpoint"))
           if (statement.trim()) await tx.execute(sql.raw(statement));
       }
@@ -36,8 +37,8 @@ test("business reporting PostgreSQL: isolated relational and authorization check
       for (const [username, role, departmentId] of [
         ["ali", "EMPLOYEE", engineering.id],
         ["reza", "EMPLOYEE", hr.id],
-        ["business", "BUSINESS_ADMIN", null],
-        ["it", "IT_ADMIN", null],
+        ["business", "BUSINESS_ADMIN", hr.id],
+        ["it", "IT_ADMIN", hr.id],
       ]) {
         const [user] = await tx
           .insert(schema.users)
@@ -47,7 +48,7 @@ test("business reporting PostgreSQL: isolated relational and authorization check
             displayName: username === "ali" || username === "reza" ? "Same Name" : username,
             role,
             departmentId,
-            employeeCode: username,
+            profileCompletedAt: new Date(),
           })
           .returning();
         people[username] = user;
@@ -68,16 +69,14 @@ test("business reporting PostgreSQL: isolated relational and authorization check
         ])
         .returning();
       const [fa, fb] = await tx
-        .insert(schema.projectFiles)
-        .values([
-          { projectId: a.id, code: "PID", name: "Same file" },
-          { projectId: b.id, code: "PID", name: "Same file", isActive: false },
-        ])
+        .insert(schema.reportTypes)
+        .values([{ name: "Report A" }, { name: "Report B", isActive: false }])
         .returning();
       const row = (person, project, file, hours, date = "2026-01-03") => ({
+        status: "APPROVED",
         employeeId: person.id,
         projectId: project.id,
-        projectFileId: file.id,
+        reportId: file.id,
         manHours: hours,
         description: "work",
         workDate: date,
@@ -134,6 +133,7 @@ test("business reporting PostgreSQL: isolated relational and authorization check
                     username: "missing-assigned",
                     ldapId: "CN=missing-assigned",
                     displayName: "Missing assigned",
+                    profileCompletedAt: new Date(),
                     role: "EMPLOYEE",
                     departmentId: engineering.id,
                   },
@@ -141,6 +141,7 @@ test("business reporting PostgreSQL: isolated relational and authorization check
                     username: "missing-unassigned",
                     ldapId: "CN=missing-unassigned",
                     displayName: "Missing unassigned",
+                    profileCompletedAt: new Date(),
                     role: "EMPLOYEE",
                   },
                   {
@@ -195,16 +196,6 @@ test("business reporting PostgreSQL: isolated relational and authorization check
                   `Phase 6 dashboard PostgreSQL: ${Math.round(performance.now() - start)}ms`,
                 );
               }
-              await isolated.insert(schema.reportingPeriods).values({
-                weekStart: base.from,
-                weekEnd: base.to,
-                status: "LOCKED",
-                lockedAt: new Date(),
-                lockedBy: people.business.id,
-              });
-              const locked = await dashboard.getBusinessDashboard();
-              assert.equal(locked.period.status, "LOCKED");
-              assert.equal(locked.report.totalHours, "10.50");
               throw rollbackDashboard;
             });
           } catch (error) {
@@ -267,10 +258,10 @@ test("business reporting PostgreSQL: isolated relational and authorization check
             [{ employeeId: people.ali.id }, 3, 650n],
             [{ departmentId: engineering.id }, 3, 650n],
             [{ projectId: a.id }, 3, 750n],
-            [{ projectFileId: fb.id }, 1, 300n],
+            [{ reportId: fb.id }, 1, 300n],
             [{ departmentId: engineering.id, projectId: a.id }, 2, 350n],
             [{ employeeId: people.reza.id, departmentId: engineering.id }, 0, 0n],
-            [{ projectId: a.id, projectFileId: fb.id }, 0, 0n],
+            [{ projectId: a.id, reportId: fb.id }, 0, 0n],
             [{ from: "2026-01-09", to: "2026-01-09" }, 1, 400n],
           ]) {
             const r = await report(filter);
@@ -280,9 +271,9 @@ test("business reporting PostgreSQL: isolated relational and authorization check
         },
       );
       await t.test(
-        "all grouping dimensions, stable identities, contextual project files",
+        "all grouping dimensions, stable identities, global Report identities",
         async () => {
-          for (const dimension of ["employee", "department", "project", "projectFile", "date"]) {
+          for (const dimension of ["employee", "department", "project", "report", "date"]) {
             const r = await report({ groupBy: dimension });
             assert.equal(
               r.groups.reduce((n, g) => n + cents(g.totalHours), 0n),
@@ -292,10 +283,10 @@ test("business reporting PostgreSQL: isolated relational and authorization check
           }
           const r = await report({ groupBy: "project" });
           assert.equal(cents(r.groups.find((g) => g.primaryKey === a.id).totalHours), 750n);
-          const files = (await report({ groupBy: "projectFile" })).groups;
+          const files = (await report({ groupBy: "report" })).groups;
           assert.notEqual(files[0].primaryKey, files[1].primaryKey);
           assert.notEqual(files[0].primaryLabel, files[1].primaryLabel);
-          assert.ok(files.every((g) => g.primaryLabel.includes("Project")));
+          assert.ok(files.every((g) => g.primaryLabel.includes("Report")));
           const employees = (await report({ groupBy: "employee" })).groups;
           assert.equal(employees.length, 2);
           assert.ok(employees.some((g) => g.primaryLabel.includes("ali")));
@@ -305,7 +296,7 @@ test("business reporting PostgreSQL: isolated relational and authorization check
         for (const [groupBy, groupBySecondary] of [
           ["project", "employee"],
           ["department", "project"],
-          ["employee", "projectFile"],
+          ["employee", "report"],
         ]) {
           const r = await report({ groupBy, groupBySecondary });
           const primary = new Map();
@@ -355,14 +346,14 @@ test("business reporting PostgreSQL: isolated relational and authorization check
           { employeeId: people.ali.id },
           { departmentId: engineering.id },
           { projectId: a.id },
-          { projectFileId: fb.id },
+          { reportId: fb.id },
           {
             departmentId: engineering.id,
             employeeId: people.ali.id,
             projectId: a.id,
-            projectFileId: fa.id,
+            reportId: fa.id,
           },
-          { projectId: a.id, projectFileId: fb.id },
+          { projectId: a.id, reportId: fb.id },
         ]) {
           const screen = await report(filters),
             out = await exported(filters);
@@ -370,7 +361,7 @@ test("business reporting PostgreSQL: isolated relational and authorization check
           assert.equal(
             out.sheets[0].data
               .slice(1)
-              .reduce((sum, r) => sum + BigInt(Math.round(r[9] * 100)), 0n),
+              .reduce((sum, r) => sum + BigInt(Math.round(r[8] * 100)), 0n),
             cents(screen.totalHours),
           );
           assert.equal(
@@ -382,11 +373,11 @@ test("business reporting PostgreSQL: isolated relational and authorization check
           ["employee"],
           ["department"],
           ["project"],
-          ["projectFile"],
+          ["report"],
           ["date"],
           ["project", "employee"],
           ["department", "project"],
-          ["employee", "projectFile"],
+          ["employee", "report"],
         ]) {
           const filter = { groupBy, groupBySecondary };
           const screen = await report(filter),
@@ -402,7 +393,7 @@ test("business reporting PostgreSQL: isolated relational and authorization check
               .reduce((sum, r) => sum + BigInt(Math.round(r.at(-1) * 100)), 0n),
             1050n,
           );
-          if (groupBy === "projectFile")
+          if (groupBy === "report")
             assert.notEqual(out.sheets[0].data[1][0], out.sheets[0].data[2][0]);
         }
       });
@@ -412,14 +403,14 @@ test("business reporting PostgreSQL: isolated relational and authorization check
           .set({ isActive: false })
           .where(eq(schema.users.id, people.ali.id));
         assert.equal((await report({ employeeId: people.ali.id })).entryCount, 3);
-        const options = await service.getReportFilterOptions({ kind: "projectFile" });
+        const options = await service.getReportFilterOptions({ kind: "report" });
         assert.equal(options.options.length, 2);
         assert.ok(options.options.find((o) => o.value === fb.id).label.includes("غیرفعال"));
         assert.deepEqual(
-          (
-            await service.getReportFilterOptions({ kind: "projectFile", projectId: a.id })
-          ).options.map((o) => o.value),
-          [fa.id],
+          (await service.getReportFilterOptions({ kind: "report", projectId: a.id })).options.map(
+            (o) => o.value,
+          ),
+          [fa.id, fb.id],
         );
         assert.ok(
           (
@@ -434,9 +425,9 @@ test("business reporting PostgreSQL: isolated relational and authorization check
         assert.equal((await report({ departmentId: hr.id })).entryCount, 4);
         const moved = await report({ groupBy: "department" });
         assert.equal(moved.groups.length, 1);
-        const history = await exported({ projectFileId: fb.id });
-        assert.equal(history.sheets[0].data[1][4], "HR");
-        assert.ok(history.sheets[0].data[1][7].includes("Project B"));
+        const history = await exported({ reportId: fb.id });
+        assert.equal(history.sheets[0].data[1][3], "HR");
+        assert.ok(history.sheets[0].data[1][6].includes("Report B"));
       });
       await t.test(
         "decimal precision and stable detail/group pagination independent of totals",
@@ -547,7 +538,7 @@ test("business reporting PostgreSQL: isolated relational and authorization check
           for (const size of [500, 3000]) {
             const date = size === 500 ? "2026-04-01" : "2026-04-02";
             await tx.execute(
-              sql`INSERT INTO work_entries (employee_id,work_date,project_id,project_file_id,description,man_hours) SELECT ${people.it.id}::uuid,${date}::date,${a.id}::uuid,${fa.id}::uuid,'فعالیت آزمایشی',0.25 FROM generate_series(1,${size})`,
+              sql`INSERT INTO work_entries (employee_id,work_date,project_id,report_id,description,man_hours,status) SELECT ${people.it.id}::uuid,${date}::date,${a.id}::uuid,${fa.id}::uuid,'فعالیت آزمایشی',0.25,'APPROVED' FROM generate_series(1,${size})`,
             );
             const query = parse({ ...base, from: date, to: date, pageSize: 25, page: 2 });
             const memory = process.memoryUsage().rss,
@@ -570,7 +561,7 @@ test("business reporting PostgreSQL: isolated relational and authorization check
             );
           }
           await tx.execute(
-            sql`INSERT INTO work_entries (employee_id,work_date,project_id,project_file_id,description,man_hours) SELECT ${people.it.id}::uuid,DATE '2026-05-01',${a.id}::uuid,${fa.id}::uuid,'limit',0.25 FROM generate_series(1,20001)`,
+            sql`INSERT INTO work_entries (employee_id,work_date,project_id,report_id,description,man_hours,status) SELECT ${people.it.id}::uuid,DATE '2026-05-01',${a.id}::uuid,${fa.id}::uuid,'limit',0.25,'APPROVED' FROM generate_series(1,20001)`,
           );
           for (const mode of ["details", "summary"])
             await assert.rejects(

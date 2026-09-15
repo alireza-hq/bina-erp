@@ -1,5 +1,7 @@
 # Phase 7 — production rollout and operations
 
+> Domain/workflow sections are historical. The [approved workflow revision](workflow-revision.md) replaces manual period locks, Project Files, identity fields and reporting-status semantics. Runtime/security/backup guidance still applies.
+
 ## Scope and release decision
 
 This phase hardens the existing application; no business workflow or schema was added. Production baseline is **one Node.js process / one application replica behind an HTTPS Nginx proxy**, using PostgreSQL and LDAPS. Horizontal scaling requires revisiting in-process throttles and export concurrency limits.

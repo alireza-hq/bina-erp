@@ -3,12 +3,11 @@ import { PeriodError } from "@/lib/period-model";
 import { requireApiRole } from "@/lib/auth";
 import { APP_ROLES } from "@/lib/roles";
 import { jsonError } from "@/lib/api";
-import { idSchema } from "@/lib/validation";
 import {
   getOwnWorkEntriesForDate,
   getOwnWorkWeek,
   getActiveWorkProjects,
-  getActiveWorkFiles,
+  getActiveWorkReports,
   updateOwnDailyEntries,
   WorkEntryError,
 } from "@/lib/work-entries";
@@ -86,12 +85,13 @@ export async function workOptionsApi(request: Request) {
   try {
     const actor = await requireApiRole(request, ...APP_ROLES);
     if ("error" in actor) return actor.error;
-    const query = checkQuery(request, ["projectId"]);
-    const projectId = query.get("projectId");
+    const query = checkQuery(request, ["kind"]);
+    if (query.get("kind") && query.get("kind") !== "reports")
+      throw new WorkEntryError("پارامتر نامعتبر است");
     return ok(
-      projectId === null
-        ? await getActiveWorkProjects()
-        : await getActiveWorkFiles(idSchema.parse(projectId)),
+      query.get("kind") === "reports"
+        ? await getActiveWorkReports()
+        : await getActiveWorkProjects(),
     );
   } catch (error) {
     return failure(error);

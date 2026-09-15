@@ -23,24 +23,25 @@ test("production scale and expired-session maintenance on a fresh isolated Postg
       for (const entry of JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")).entries) {
         const source = readFileSync(`drizzle/${entry.tag}.sql`, "utf8")
           .replaceAll('"public"', `"${scratch}"`)
-          .replaceAll('"legacy_letter_list"', `"${scratch}_archive"`);
+          .replaceAll('"legacy_letter_list"', `"${scratch}_archive"`)
+          .replaceAll('"workflow_archive"', `"${scratch}_workflow"`);
         for (const statement of source.split("--> statement-breakpoint"))
           if (statement.trim()) await tx.unsafe(statement);
       }
       await tx`UPDATE users SET active=false WHERE ldap_id LIKE 'pending:%'`;
       await tx`INSERT INTO departments(name,code) SELECT 'Department '||n, 'D'||n FROM generate_series(1,20) n`;
       await tx`INSERT INTO projects(name,code,is_active) SELECT 'Project '||n, 'P'||n,n<=18 FROM generate_series(1,20) n`;
-      await tx`INSERT INTO project_files(project_id,name,code) SELECT p.id,'File '||n,'F'||n FROM projects p CROSS JOIN generate_series(1,10) n`;
-      await tx`INSERT INTO users(ldap_id,username,display_name,department_id) SELECT 'CN=perf-'||n,'perf-'||n,'Employee '||n,d.id FROM generate_series(1,100) n JOIN departments d ON d.code='D'||(((n-1)%20)+1)`;
-      await tx`INSERT INTO work_entries(employee_id,work_date,project_id,project_file_id,description,man_hours)
-      SELECT u.id,DATE '2026-01-03'+((n-1)/200)::int,p.id,f.id,'Synthetic work',CASE WHEN n%2=0 THEN 0.25 ELSE 1.25 END
+      await tx`INSERT INTO report_types(name) SELECT 'Report '||n FROM generate_series(1,200) n`;
+      await tx`INSERT INTO users(ldap_id,username,display_name,department_id,profile_completed_at) SELECT 'CN=perf-'||n,'perf-'||n,'Employee '||n,d.id,now() FROM generate_series(1,100) n JOIN departments d ON d.code='D'||(((n-1)%20)+1)`;
+      await tx`INSERT INTO work_entries(employee_id,work_date,project_id,report_id,description,man_hours,status)
+      SELECT u.id,DATE '2026-01-03'+((n-1)/200)::int,p.id,f.id,'Synthetic work',CASE WHEN n%2=0 THEN 0.25 ELSE 1.25 END,'APPROVED'
       FROM generate_series(1,14000) n JOIN users u ON u.username='perf-'||(((n-1)%100)+1)
-      JOIN projects p ON p.code='P'||(((n-1)%20)+1) JOIN project_files f ON f.project_id=p.id AND f.code='F'||(((n-1)%10)+1)`;
+      JOIN projects p ON p.code='P'||(((n-1)%20)+1) JOIN report_types f ON f.name='Report '||(((n-1)%200)+1)`;
       await tx`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,new_data) SELECT employee_id,'WORK_ENTRY_CREATED','WORK_ENTRY',id,jsonb_build_object('manHours',man_hours,'description',description) FROM work_entries`;
       for (const table of [
         "users",
         "projects",
-        "project_files",
+        "report_types",
         "departments",
         "work_entries",
         "audit_logs",
@@ -136,7 +137,7 @@ test("production scale and expired-session maintenance on a fresh isolated Postg
       assert.equal(await cleanupExpiredSessions(tx), 0);
       assert.equal((await tx`SELECT token_hash FROM sessions`)[0].token_hash, "valid-fixture");
       console.log(
-        "Production fixture: 100 employees, 20 departments/projects, 200 files, 14000 entries/audits",
+        "Production fixture: 100 employees, 20 departments/projects, 200 Reports, 14000 entries/audits",
         JSON.stringify(timings),
       );
       throw rollback;

@@ -1,4 +1,5 @@
 "use client";
+import { statusLabels } from "@/lib/approval-model";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -15,14 +16,14 @@ type Draft = {
   key: string;
   id?: string;
   projectId: string;
-  projectFileId: string;
+  reportId: string;
   description: string;
   manHours: string;
 };
 const emptyRow = (key: string): Draft => ({
   key,
   projectId: "",
-  projectFileId: "",
+  reportId: "",
   description: "",
   manHours: "",
 });
@@ -31,124 +32,30 @@ const draftRows = (day: OwnDay) =>
     key: row.id,
     id: row.id,
     projectId: row.projectId,
-    projectFileId: row.projectFileId,
+    reportId: row.reportId,
     description: row.description,
     manHours: row.manHours,
   }));
 const fingerprint = (rows: Draft[]) =>
   JSON.stringify(
-    rows.map(({ id, projectId, projectFileId, description, manHours }) => ({
+    rows.map(({ id, projectId, reportId, description, manHours }) => ({
       id,
       projectId,
-      projectFileId,
+      reportId,
       description,
       manHours: hoursToHundredths(manHours) ?? manHours,
     })),
   );
 
-function FileSelector({
-  row,
-  original,
-  disabled,
-  onChange,
-  index,
-}: {
-  row: Draft;
-  original?: OwnDay["entries"][number];
-  disabled: boolean;
-  onChange: (id: string) => void;
-  index: number;
-}) {
-  const [result, setResult] = useState<{ projectId: string; options: Choice[]; error: string }>({
-    projectId: "",
-    options: [],
-    error: "",
-  });
-  const [retry, setRetry] = useState(0);
-  const historicalParent = original?.projectId === row.projectId && !original.projectActive;
-  useEffect(() => {
-    if (!row.projectId || historicalParent) return;
-    const controller = new AbortController();
-    fetch(`/api/work-entry-options?projectId=${encodeURIComponent(row.projectId)}`, {
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then(async (response) => {
-        const value = await response.json();
-        if (!response.ok)
-          throw new Error(
-            response.status === 401
-              ? "نشست منقضی یا حساب غیرفعال شده است؛ دوباره وارد شوید."
-              : value.message || "دریافت فایل‌های پروژه انجام نشد",
-          );
-        if (!controller.signal.aborted)
-          setResult({ projectId: row.projectId, options: value.data, error: "" });
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted)
-          setResult({
-            projectId: row.projectId,
-            options: [],
-            error: error instanceof Error ? error.message : "خطای ارتباط",
-          });
-      });
-    return () => controller.abort();
-  }, [row.projectId, historicalParent, retry]);
-  const loading = Boolean(row.projectId) && !historicalParent && result.projectId !== row.projectId;
-  const choices =
-    !historicalParent && result.projectId === row.projectId ? [...result.options] : [];
-  if (
-    original &&
-    original.projectId === row.projectId &&
-    !choices.some((c) => c.id === original.projectFileId)
-  )
-    choices.push({
-      id: original.projectFileId,
-      name: `${original.fileName}${!original.fileActive || !original.projectActive ? " (غیرفعال؛ سابقه موجود)" : ""}`,
-      code: original.fileCode,
-    });
-  const error = result.projectId === row.projectId ? result.error : "";
-  return (
-    <>
-      <CustomSelect
-        searchable
-        value={row.projectFileId}
-        onChange={onChange}
-        disabled={disabled || !row.projectId || loading || Boolean(error)}
-        ariaLabel={`فایل پروژه ردیف ${index + 1}`}
-        options={[
-          { value: "", label: loading ? "در حال بارگذاری…" : "انتخاب فایل پروژه" },
-          ...choices.map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` })),
-        ]}
-      />
-      {loading && <small role="status">در حال دریافت فایل‌ها…</small>}
-      {!loading && row.projectId && !choices.length && !error && (
-        <small>این پروژه فایل فعال ندارد.</small>
-      )}
-      {error && (
-        <div role="alert" className="field-error">
-          {error}{" "}
-          <button
-            type="button"
-            className="subtle-button"
-            onClick={() => setRetry((v) => v + 1)}
-            disabled={disabled}
-          >
-            تلاش دوباره
-          </button>
-        </div>
-      )}
-    </>
-  );
-}
-
 export function WorkDayEditor({
   initialDay,
   projects,
+  reports,
   today,
 }: {
   initialDay: OwnDay;
   projects: Choice[];
+  reports: { id: string; name: string }[];
   today: string;
 }) {
   const router = useRouter();
@@ -176,13 +83,13 @@ export function WorkDayEditor({
   function appendRow(source?: Draft) {
     const key = crypto.randomUUID();
     const original = day.entries.find((entry) => entry.id === source?.id);
-    const reusable = !original || (original.projectActive && original.fileActive);
+    const reusable = !original || (original.projectActive && original.reportActive);
     const next = source
       ? {
           ...source,
           key,
           id: undefined,
-          ...(!reusable ? { projectId: "", projectFileId: "" } : {}),
+          ...(!reusable ? { projectId: "", reportId: "" } : {}),
         }
       : emptyRow(key);
     focusRow.current = key;
@@ -248,10 +155,10 @@ export function WorkDayEditor({
     setExpired(false);
     const parsed = dailyEntriesSchema.safeParse({
       version: day.version,
-      entries: rows.map(({ id, projectId, projectFileId, description, manHours }) => ({
+      entries: rows.map(({ id, projectId, reportId, description, manHours }) => ({
         ...(id ? { id } : {}),
         projectId,
-        projectFileId,
+        reportId,
         description,
         manHours,
       })),
@@ -279,8 +186,9 @@ export function WorkDayEditor({
       }
       setDay(value.data);
       setRows(draftRows(value.data));
+      router.refresh();
       setSavedFingerprint(fingerprint(draftRows(value.data)));
-      setSuccess("گزارش این روز با موفقیت ذخیره شد.");
+      setSuccess("گزارش‌ها برای تأیید ارسال شدند.");
     } catch (error) {
       setError(
         error instanceof Error ? error.message : "ارتباط با سرور برقرار نشد. ردیف‌ها حفظ شده‌اند.",
@@ -295,7 +203,7 @@ export function WorkDayEditor({
       <header className="page-title">
         <div>
           <h1>ثبت گزارش کار</h1>
-          <p>چند فعالیت را برای یک روز وارد کنید و با هم ذخیره کنید.</p>
+          <p>ردیف‌های جدید و ردشده با هم برای تأیید مدیر واحد ارسال می‌شوند.</p>
         </div>
         <Link className="secondary-button" href="/reports">
           گزارش‌های من
@@ -320,15 +228,24 @@ export function WorkDayEditor({
               <thead>
                 <tr>
                   <th>پروژه</th>
-                  <th>فایل پروژه</th>
-                  <th>شرح فعالیت</th>
+                  <th>گزارش</th>
                   <th>نفر-ساعت</th>
+                  <th>توضیحات / ملاحظات</th>
+                  <th>وضعیت</th>
                   <th>عملیات</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, index) => {
                   const original = day.entries.find((entry) => entry.id === row.id);
+                  const rowReadOnly =
+                    readOnly || Boolean(original && original.status !== "REJECTED");
+                  const reportChoices = [...reports];
+                  if (original && !reportChoices.some((r) => r.id === original.reportId))
+                    reportChoices.push({
+                      id: original.reportId,
+                      name: original.reportName + " (سابقه)",
+                    });
                   const choices = [...projects];
                   if (original && !choices.some((p) => p.id === original.projectId))
                     choices.push({
@@ -342,7 +259,7 @@ export function WorkDayEditor({
                         <CustomSelect
                           searchable
                           value={row.projectId}
-                          disabled={readOnly}
+                          disabled={rowReadOnly}
                           ariaLabel={`پروژه ردیف ${index + 1}`}
                           options={[
                             { value: "", label: "انتخاب پروژه" },
@@ -352,30 +269,21 @@ export function WorkDayEditor({
                             })),
                           ]}
                           onChange={(projectId) => {
-                            if (projectId !== row.projectId)
-                              updateRow(row.key, { projectId, projectFileId: "" });
+                            if (projectId !== row.projectId) updateRow(row.key, { projectId });
                           }}
                         />
                       </td>
                       <td>
-                        <FileSelector
-                          row={row}
-                          original={original}
-                          index={index}
-                          disabled={readOnly}
-                          onChange={(projectFileId) => updateRow(row.key, { projectFileId })}
-                        />
-                      </td>
-                      <td>
-                        <textarea
-                          aria-label={`شرح فعالیت ردیف ${index + 1}`}
-                          disabled={readOnly}
-                          maxLength={WORK_LIMITS.descriptionLength}
-                          value={row.description}
-                          onChange={(event) =>
-                            updateRow(row.key, { description: event.target.value })
-                          }
-                          rows={2}
+                        <CustomSelect
+                          searchable
+                          ariaLabel={`گزارش ردیف ${index + 1}`}
+                          value={row.reportId}
+                          onChange={(reportId) => updateRow(row.key, { reportId })}
+                          disabled={rowReadOnly}
+                          options={[
+                            { value: "", label: "انتخاب گزارش" },
+                            ...reportChoices.map((r) => ({ value: r.id, label: r.name })),
+                          ]}
                         />
                       </td>
                       <td>
@@ -385,11 +293,36 @@ export function WorkDayEditor({
                           inputMode="decimal"
                           dir="ltr"
                           maxLength={16}
-                          disabled={readOnly}
+                          disabled={rowReadOnly}
                           placeholder="1.5"
                           value={row.manHours}
                           onChange={(event) => updateRow(row.key, { manHours: event.target.value })}
                         />
+                      </td>
+                      <td>
+                        <textarea
+                          aria-label={`توضیحات / ملاحظات ردیف ${index + 1}`}
+                          disabled={rowReadOnly}
+                          maxLength={WORK_LIMITS.descriptionLength}
+                          value={row.description}
+                          onChange={(event) =>
+                            updateRow(row.key, { description: event.target.value })
+                          }
+                          rows={2}
+                        />
+                      </td>
+                      <td>
+                        {original ? statusLabels[original.status] : "جدید"}
+                        {original?.status === "REJECTED" &&
+                          day.history
+                            ?.filter((h) => h.workEntryId === row.id && h.decision === "REJECTED")
+                            .slice(0, 1)
+                            .map((h) => (
+                              <small key={h.id}>
+                                {h.stage === "DEPARTMENT" ? "مدیر واحد" : "مدیر پروژه"} —{" "}
+                                {h.managerName}: {h.rejectionReason}
+                              </small>
+                            ))}
                       </td>
                       <td>
                         <button
@@ -405,7 +338,7 @@ export function WorkDayEditor({
                           type="button"
                           aria-label={`حذف ردیف ${index + 1}`}
                           className="secondary-button"
-                          disabled={readOnly}
+                          disabled={readOnly || Boolean(row.id)}
                           onClick={() => {
                             setRows((rows) => rows.filter((r) => r.key !== row.key));
                             setSuccess("");
@@ -429,7 +362,7 @@ export function WorkDayEditor({
             <p className="admin-help">
               {locked
                 ? "فعالیتی برای این روز ثبت نشده است."
-                : "ردیفی وجود ندارد. ذخیره، تمام ردیف‌های قبلی این روز شما را حذف می‌کند."}
+                : "ردیفی وجود ندارد. یک ردیف جدید اضافه کنید."}
             </p>
           )}
           <div className="report-editor-footer">
@@ -450,7 +383,7 @@ export function WorkDayEditor({
               type="submit"
               disabled={readOnly || expired || day.date > today}
             >
-              {busy ? "در حال ذخیره…" : "ذخیره"}
+              {busy ? "در حال ارسال…" : "ارسال / ارسال مجدد ردیف‌های ردشده"}
             </button>
           </div>
           <p className="admin-help" role="status">
@@ -461,7 +394,8 @@ export function WorkDayEditor({
                 : ""}
           </p>
           <p className="admin-help">
-            حداکثر ۵۰ ردیف، ۲۴ ساعت در روز و دو رقم اعشار. تغییرات پس از ذخیره اعمال می‌شوند.
+            حداکثر ۵۰ ردیف، ۲۴ ساعت در روز و دو رقم اعشار. پس از ارسال، ردیف‌ها تا زمان رد شدن قابل
+            ویرایش نیستند.
           </p>
           {total > WORK_LIMITS.warningHundredths && (
             <p className="report-warning" role="status">

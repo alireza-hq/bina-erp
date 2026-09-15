@@ -25,12 +25,12 @@ test("actual XLSX parses Persian text, numeric hours, safe strings and overall s
   const entries = ["0.25", "0.50", "1.25", "3.75"].map((manHours, i) => ({
     date: "2026-01-03",
     employeeName: ['=HYPERLINK("evil")', "+cmd", "-cmd", "@SUM(A1)"][i],
-    employeeCode: "001",
+    status: "APPROVED",
     username: "ali",
     department: "مهندسی",
     projectCode: "A",
     projectName: "پروژه",
-    projectFile: "A / PID",
+    report: "A / PID",
     description: "بررسی نقشه\nمتن فارسی",
     manHours,
   }));
@@ -43,15 +43,16 @@ test("actual XLSX parses Persian text, numeric hours, safe strings and overall s
     ["گزارش تفصیلی", "مشخصات گزارش"],
   );
   assert.equal(sheets[0].data.length, 5);
-  assert.equal(sheets[0].data[0][9], "نفر-ساعت");
+  assert.equal(sheets[0].data[0][8], "نفر-ساعت");
   assert.deepEqual(
-    sheets[0].data.slice(1).map((r) => r[9]),
+    sheets[0].data.slice(1).map((r) => r[8]),
     [0.25, 0.5, 1.25, 3.75],
   );
-  assert.equal(sheets[0].data[1][2], "001");
+  assert.equal(sheets[0].data[1][2], "ali");
+  assert.equal(sheets[0].data[1][9], "تأیید شده");
   assert.equal(sheets[0].data[1][1], '\'=HYPERLINK("evil")');
   assert.match(sheets[0].data[1][0], /^[۰-۹]{4}\/[۰-۹]{2}\/[۰-۹]{2}$/);
-  assert.equal(sheets[0].data[1][8], "بررسی نقشه\nمتن فارسی");
+  assert.equal(sheets[0].data[1][7], "بررسی نقشه\nمتن فارسی");
   assert.equal(sheets[1].data.find((r) => r[0] === "جمع نفر-ساعت منبع")[1], 5.75);
   const summary = await readWorkbook(await workbookModule.createReportWorkbook(data, "summary"));
   assert.deepEqual(summary[0].data[1], ["جمع کل فیلترشده", 4, 5.75]);

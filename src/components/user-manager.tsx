@@ -7,11 +7,9 @@ export type UserRow = {
   id: string;
   username: string;
   displayName: string;
-  email: string | null;
   role: AppRole;
   isActive: boolean;
   departmentId: string | null;
-  employeeCode: string | null;
   lastLoginAt: string | null;
 };
 type Department = { id: string; name: string; isActive: boolean };
@@ -34,9 +32,7 @@ export function UserManager({
   const [message, setMessage] = useState("");
   const visible = rows.filter(
     (row) =>
-      `${row.username} ${row.displayName} ${row.employeeCode || ""}`
-        .toLowerCase()
-        .includes(query.trim().toLowerCase()) &&
+      `${row.username} ${row.displayName} `.toLowerCase().includes(query.trim().toLowerCase()) &&
       (roleFilter === "all" || row.role === roleFilter) &&
       (status === "all" || row.isActive === (status === "active")),
   );
@@ -61,7 +57,7 @@ export function UserManager({
         body: JSON.stringify({
           role: editing.role,
           departmentId: editing.departmentId,
-          employeeCode: editing.employeeCode,
+          displayName: editing.displayName,
           isActive: editing.isActive,
         }),
       });
@@ -85,7 +81,7 @@ export function UserManager({
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="نام، نام کاربری یا کد پرسنلی"
+              placeholder="نام، نام کاربری یا نام و نام خانوادگی فارسی"
             />
           </label>
           <CustomSelect
@@ -124,7 +120,6 @@ export function UserManager({
                   <td>
                     <strong>{row.displayName}</strong>
                     <small dir="ltr">{row.username}</small>
-                    <small>{row.employeeCode || "بدون کد پرسنلی"}</small>
                   </td>
                   <td>
                     {roleLabels[row.role]}
@@ -169,7 +164,6 @@ export function UserManager({
             <fieldset disabled={busy}>
               <strong>{editing.displayName}</strong>
               <p dir="ltr">{editing.username}</p>
-              <p dir="ltr">{editing.email || "—"}</p>
               <p className="admin-help">
                 آخرین ورود:{" "}
                 {editing.lastLoginAt
@@ -177,13 +171,11 @@ export function UserManager({
                   : "ثبت نشده"}
               </p>
               <label className="field">
-                کد پرسنلی
+                نام و نام خانوادگی فارسی
                 <input
-                  maxLength={80}
-                  value={editing.employeeCode || ""}
-                  onChange={(event) =>
-                    setEditing({ ...editing, employeeCode: event.target.value || null })
-                  }
+                  maxLength={160}
+                  value={editing.displayName || ""}
+                  onChange={(event) => setEditing({ ...editing, displayName: event.target.value })}
                 />
               </label>
               <div className="field">
@@ -199,6 +191,7 @@ export function UserManager({
               <div className="field">
                 <span>واحد</span>
                 <CustomSelect
+                  searchable
                   value={editing.departmentId || ""}
                   onChange={(departmentId) =>
                     setEditing({ ...editing, departmentId: departmentId || null })

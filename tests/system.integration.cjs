@@ -25,10 +25,15 @@ test("Phase 1 real PostgreSQL integration (all schema/data changes rolled back)"
       for (const entry of JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")).entries) {
         const source = readFileSync(`drizzle/${entry.tag}.sql`, "utf8")
           .replaceAll('"public"', `"${scratch}"`)
-          .replaceAll('"legacy_letter_list"', `"${archive}"`);
+          .replaceAll('"legacy_letter_list"', `"${archive}"`)
+          .replaceAll('"workflow_archive"', `"${archive}_workflow"`);
         for (const statement of source.split("--> statement-breakpoint"))
           if (statement.trim()) await tx.execute(sql.raw(statement));
       }
+      const [onboardDepartment] = await tx
+        .insert(schema.departments)
+        .values({ name: "Initial" })
+        .returning();
       const ids = {};
       const cookies = {};
       for (const role of ["EMPLOYEE", "BUSINESS_ADMIN", "IT_ADMIN"]) {
@@ -38,6 +43,8 @@ test("Phase 1 real PostgreSQL integration (all schema/data changes rolled back)"
             ldapId: `CN=${role},DC=test`,
             username: role.toLowerCase(),
             displayName: role,
+            departmentId: onboardDepartment.id,
+            profileCompletedAt: new Date(),
             role,
           })
           .returning();
@@ -82,7 +89,17 @@ test("Phase 1 real PostgreSQL integration (all schema/data changes rolled back)"
             const request = new Request("http://localhost:3000/api/admin/test", {
               method,
               headers: { origin: "http://localhost:3000", "Content-Type": "application/json" },
-              ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+              ...(body === undefined
+                ? {}
+                : {
+                    body: JSON.stringify(
+                      action === "masterCollection" &&
+                        method === "POST" &&
+                        ["departments", "projects"].includes(args[0])
+                        ? { managerUserId: ids.IT_ADMIN, ...body }
+                        : body,
+                    ),
+                  }),
             });
             const response = await modules(savepoint).api[action](request, ...args);
             // A caught database constraint failure still needs its savepoint rolled back.
@@ -99,7 +116,7 @@ test("Phase 1 real PostgreSQL integration (all schema/data changes rolled back)"
         assert.equal(response.status, status, JSON.stringify(result));
         return result.data;
       };
-      let department, project, otherProject, file;
+      let department, project;
       await t.test(
         "every admin operation denies anonymous, employee and business-admin requests",
         async () => {
@@ -111,9 +128,6 @@ test("Phase 1 real PostgreSQL integration (all schema/data changes rolled back)"
               ["POST", "masterCollection", [kind], { name: "Test", code: "Test" }],
               ["PATCH", "masterItem", [kind, randomUUID()], { isActive: false }],
             ]),
-            ["GET", "projectFileCollection", [randomUUID()]],
-            ["POST", "projectFileCollection", [randomUUID()], { code: "Test", name: "Test" }],
-            ["PATCH", "projectFileItem", [randomUUID(), randomUUID()], { isActive: false }],
           ];
           for (const role of [null, "EMPLOYEE", "BUSINESS_ADMIN"])
             for (const [method, action, args, body] of operations)
@@ -179,7 +193,7 @@ test("Phase 1 real PostgreSQL integration (all schema/data changes rolled back)"
             await call("IT_ADMIN", "PATCH", "updateUser", [ids.EMPLOYEE], {
               role: "BUSINESS_ADMIN",
               departmentId: department.id,
-              employeeCode: "E-1",
+              displayName: "نام فارسی",
             }),
           );
           assert.equal(changed.role, "BUSINESS_ADMIN");
@@ -220,7 +234,7 @@ test("Phase 1 real PostgreSQL integration (all schema/data changes rolled back)"
               await data(
                 await call("IT_ADMIN", "PATCH", "updateUser", [ids.EMPLOYEE], {
                   departmentId: department.id,
-                  employeeCode: "E-2",
+                  displayName: "نام فارسی جدید",
                 }),
               )
             ).departmentId,
@@ -271,7 +285,7 @@ test("Phase 1 real PostgreSQL integration (all schema/data changes rolled back)"
             }),
             201,
           );
-          otherProject = await data(
+          await data(
             await call("IT_ADMIN", "POST", "masterCollection", ["projects"], {
               code: "P-2",
               name: "Project two",
@@ -313,104 +327,30 @@ test("Phase 1 real PostgreSQL integration (all schema/data changes rolled back)"
           );
         },
       );
-      await t.test(
-        "project files belong to one project, reject duplicates/cross-project updates and honor activation",
-        async () => {
-          file = await data(
-            await call("IT_ADMIN", "POST", "projectFileCollection", [project.id], {
-              code: "PID-001",
-              name: "Process diagram",
-            }),
-            201,
-          );
-          assert.equal(file.projectId, project.id);
-          assert.equal(
-            (
-              await call("IT_ADMIN", "POST", "projectFileCollection", [randomUUID()], {
-                code: "PID-001",
-                name: "Missing project",
-              })
-            ).status,
-            404,
-          );
-          assert.equal(
-            (
-              await call("IT_ADMIN", "POST", "projectFileCollection", [project.id], {
-                code: "pid-001",
-                name: "Duplicate",
-              })
-            ).status,
-            409,
-          );
-          await data(
-            await call("IT_ADMIN", "POST", "projectFileCollection", [otherProject.id], {
-              code: "PID-001",
-              name: "Allowed in another project",
-            }),
-            201,
-          );
-          assert.equal(
-            (
-              await call("IT_ADMIN", "PATCH", "projectFileItem", [otherProject.id, file.id], {
-                name: "Wrong project",
-              })
-            ).status,
-            404,
-          );
-          assert.equal(
-            (
-              await call("IT_ADMIN", "PATCH", "projectFileItem", [project.id, file.id], {
-                projectId: otherProject.id,
-              })
-            ).status,
-            400,
-          );
-          const updated = await data(
-            await call("IT_ADMIN", "PATCH", "projectFileItem", [project.id, file.id], {
-              name: "Revised",
-              isActive: false,
-            }),
-          );
-          assert.equal(updated.isActive, false);
-          await data(
-            await call("IT_ADMIN", "PATCH", "masterItem", ["projects", project.id], {
-              isActive: false,
-            }),
-          );
-          assert.equal(
-            (
-              await call("IT_ADMIN", "POST", "projectFileCollection", [project.id], {
-                code: "MR-1",
-                name: "Blocked",
-              })
-            ).status,
-            409,
-          );
-          assert.equal(
-            (
-              await call("IT_ADMIN", "PATCH", "projectFileItem", [project.id, file.id], {
-                isActive: true,
-              })
-            ).status,
-            409,
-          );
-          assert.equal(
-            (
-              await data(
-                await call("IT_ADMIN", "PATCH", "projectFileItem", [project.id, file.id], {
-                  description: "History retained",
-                }),
-              )
-            ).isActive,
-            false,
-          );
-          assert.equal(
-            (await data(await call("IT_ADMIN", "GET", "projectFileCollection", [project.id])))
-              .length,
-            1,
-          );
-        },
-      );
+      await t.test("global Report master data validates uniqueness and activation", async () => {
+        const report = await data(
+          await call("IT_ADMIN", "POST", "masterCollection", ["reports"], { name: "طراحی" }),
+          201,
+        );
+        assert.equal(
+          (await call("IT_ADMIN", "POST", "masterCollection", ["reports"], { name: "طراحی" }))
+            .status,
+          409,
+        );
+        const off = await data(
+          await call("IT_ADMIN", "PATCH", "masterItem", ["reports", report.id], {
+            isActive: false,
+          }),
+        );
+        assert.equal(off.isActive, false);
+        const edited = await data(
+          await call("IT_ADMIN", "PATCH", "masterItem", ["reports", report.id], {
+            name: "بررسی",
+            isActive: true,
+          }),
+        );
+        assert.equal(edited.name, "بررسی");
+      });
       await t.test(
         "LDAP provisioning defaults to EMPLOYEE and sync preserves local permissions/active state",
         async () => {

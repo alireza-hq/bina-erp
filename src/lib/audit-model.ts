@@ -1,4 +1,18 @@
 export const AUDIT_ACTIONS = [
+  "WORK_ENTRY_SUBMITTED",
+  "WORK_ENTRY_RESUBMITTED",
+  "DEPARTMENT_APPROVED",
+  "DEPARTMENT_REJECTED",
+  "PROJECT_APPROVED",
+  "PROJECT_REJECTED",
+  "DEPARTMENT_MANAGER_CHANGED",
+  "PROJECT_MANAGER_CHANGED",
+  "REPORT_CREATED",
+  "REPORT_UPDATED",
+  "REPORT_ACTIVATED",
+  "REPORT_DEACTIVATED",
+  "PROFILE_COMPLETED",
+
   "PERIOD_LOCKED",
   "PERIOD_UNLOCKED",
   "WORK_ENTRY_CREATED",
@@ -23,6 +37,7 @@ export const AUDIT_ACTIONS = [
   "PROJECT_FILE_DEACTIVATED",
 ] as const;
 export const AUDIT_ENTITIES = [
+  "REPORT",
   "PERIOD",
   "WORK_ENTRY",
   "USER",
@@ -33,14 +48,29 @@ export const AUDIT_ENTITIES = [
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type AuditEntity = (typeof AUDIT_ENTITIES)[number];
 export const auditEntityLabels: Record<AuditEntity, string> = {
+  REPORT: "گزارش",
   PERIOD: "دوره",
   WORK_ENTRY: "فعالیت",
   USER: "کاربر",
   DEPARTMENT: "واحد",
   PROJECT: "پروژه",
-  PROJECT_FILE: "فایل پروژه",
+  PROJECT_FILE: "گزارش",
 };
 export const auditActionLabels: Record<AuditAction, string> = {
+  WORK_ENTRY_SUBMITTED: "ارسال گزارش",
+  WORK_ENTRY_RESUBMITTED: "ارسال مجدد گزارش",
+  DEPARTMENT_APPROVED: "تأیید مدیر واحد",
+  DEPARTMENT_REJECTED: "رد مدیر واحد",
+  PROJECT_APPROVED: "تأیید مدیر پروژه",
+  PROJECT_REJECTED: "رد مدیر پروژه",
+  DEPARTMENT_MANAGER_CHANGED: "تغییر مدیر واحد",
+  PROJECT_MANAGER_CHANGED: "تغییر مدیر پروژه",
+  REPORT_CREATED: "ایجاد گزارش",
+  REPORT_UPDATED: "ویرایش گزارش",
+  REPORT_ACTIVATED: "فعال‌سازی گزارش",
+  REPORT_DEACTIVATED: "غیرفعال‌سازی گزارش",
+  PROFILE_COMPLETED: "تکمیل مشخصات",
+
   PERIOD_LOCKED: "قفل دوره",
   PERIOD_UNLOCKED: "باز کردن دوره",
   WORK_ENTRY_CREATED: "ثبت فعالیت",
@@ -59,8 +89,8 @@ export const auditActionLabels: Record<AuditAction, string> = {
   PROJECT_UPDATED: "ویرایش پروژه",
   PROJECT_ACTIVATED: "فعال‌سازی پروژه",
   PROJECT_DEACTIVATED: "غیرفعال‌سازی پروژه",
-  PROJECT_FILE_CREATED: "ایجاد فایل پروژه",
-  PROJECT_FILE_UPDATED: "ویرایش فایل پروژه",
-  PROJECT_FILE_ACTIVATED: "فعال‌سازی فایل پروژه",
-  PROJECT_FILE_DEACTIVATED: "غیرفعال‌سازی فایل پروژه",
+  PROJECT_FILE_CREATED: "ایجاد گزارش",
+  PROJECT_FILE_UPDATED: "ویرایش گزارش",
+  PROJECT_FILE_ACTIVATED: "فعال‌سازی گزارش",
+  PROJECT_FILE_DEACTIVATED: "غیرفعال‌سازی گزارش",
 };
